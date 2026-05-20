@@ -2804,25 +2804,25 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             .menu-grid {{
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-                gap: 20px;
-                max-width: 1200px;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 14px;
+                max-width: 1280px;
                 width: 100%;
             }}
             
-            /* Card base */
+            /* Card base — versión compacta */
             .modulo-card {{
                 background: #ffffff;
                 border: 1.5px solid;
-                border-radius: 18px;
-                padding: 28px 24px 24px;
+                border-radius: 14px;
+                padding: 16px 16px 14px;
                 cursor: pointer;
                 transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
                 position: relative;
                 overflow: hidden;
                 display: flex;
                 flex-direction: column;
-                min-height: 230px;
+                min-height: 130px;
                 animation: cardEntrada 0.6s ease backwards;
             }}
             
@@ -3735,16 +3735,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 0 0 6px rgba(14,165,233,0.16), 0 12px 32px rgba(14,165,233,0.40);
             }}
             
-            /* Contenido de la card */
+            /* Contenido de la card — compacto */
             .modulo-icono {{
-                width: 56px;
-                height: 56px;
-                border-radius: 14px;
+                width: 40px;
+                height: 40px;
+                border-radius: 11px;
                 background: var(--card-color-soft);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                margin-bottom: 18px;
+                margin-bottom: 12px;
                 transition: all 0.3s;
             }}
             .modulo-card:hover .modulo-icono {{
@@ -3753,27 +3753,27 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             .modulo-icono svg {{
-                width: 28px;
-                height: 28px;
+                width: 22px;
+                height: 22px;
                 stroke: var(--card-color);
                 stroke-width: 2;
                 fill: none;
             }}
             
             .modulo-titulo {{
-                font-size: 19px;
+                font-size: 15px;
                 font-weight: 700;
-                margin: 0 0 6px;
+                margin: 0 0 4px;
                 color: var(--card-color-deep);
                 letter-spacing: -0.3px;
-                line-height: 1.2;
+                line-height: 1.15;
             }}
             
             .modulo-descripcion {{
-                font-size: 12.5px;
+                font-size: 11px;
                 color: #6b7268;
-                margin: 0 0 18px;
-                line-height: 1.5;
+                margin: 0 0 12px;
+                line-height: 1.4;
                 flex: 1;
             }}
             
@@ -3824,6 +3824,306 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .modulo-badge.proximamente {{
                 background: rgba(0,0,0,0.05);
                 color: #6b7268;
+            }}
+            
+            /* ====================================================== */
+            /* ===== TABLERO RESUMEN · MATRICES DE INDICADORES ===== */
+            /* ====================================================== */
+            .tablero-resumen {{
+                max-width: 1280px;
+                width: 100%;
+                margin: 40px auto 0;
+                animation: cardEntrada 0.7s ease backwards;
+                animation-delay: 0.4s;
+            }}
+            .tablero-header {{
+                text-align: center;
+                margin-bottom: 22px;
+            }}
+            .tablero-titulo {{
+                font-size: 26px;
+                font-weight: 800;
+                letter-spacing: -0.5px;
+                margin: 0 0 6px;
+                background: linear-gradient(135deg, #0e7490 0%, #6d28d9 50%, #b45309 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }}
+            .tablero-sub {{
+                font-size: 13px;
+                color: #6b7268;
+                margin: 0;
+            }}
+            .tablero-sub span {{
+                font-weight: 700;
+                color: #0e7490;
+            }}
+            
+            /* Tarjeta contenedora de cada matriz — glassmorphism */
+            .matriz-card {{
+                background: rgba(255,255,255,0.72);
+                backdrop-filter: blur(14px);
+                -webkit-backdrop-filter: blur(14px);
+                border: 1px solid rgba(255,255,255,0.6);
+                border-radius: 20px;
+                padding: 22px 22px 14px;
+                margin-bottom: 28px;
+                box-shadow: 0 10px 40px rgba(15,23,42,0.10), inset 0 1px 0 rgba(255,255,255,0.7);
+                position: relative;
+                overflow: hidden;
+            }}
+            .matriz-card::before {{
+                content: "";
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 4px;
+                opacity: 0.9;
+            }}
+            .matriz-pct::before {{
+                background: linear-gradient(90deg, #0e7490, #06b6d4, #6d28d9);
+            }}
+            .matriz-money::before {{
+                background: linear-gradient(90deg, #b45309, #f59e0b, #15803d);
+            }}
+            
+            .matriz-card-head {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 18px;
+            }}
+            .matriz-card-ico {{
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                font-weight: 800;
+                color: #fff;
+                flex-shrink: 0;
+            }}
+            .matriz-pct .matriz-card-ico {{
+                background: linear-gradient(135deg, #0e7490, #6d28d9);
+                box-shadow: 0 6px 18px rgba(13,116,144,0.4);
+            }}
+            .matriz-money .matriz-card-ico {{
+                background: linear-gradient(135deg, #b45309, #15803d);
+                box-shadow: 0 6px 18px rgba(180,83,9,0.4);
+            }}
+            .matriz-card-head h3 {{
+                font-size: 17px;
+                font-weight: 700;
+                margin: 0 0 2px;
+                color: #1e293b;
+            }}
+            .matriz-card-head span {{
+                font-size: 12px;
+                color: #94a3b8;
+            }}
+            
+            /* Scroll container de la matriz */
+            .matriz-scroll {{
+                overflow-x: scroll;
+                overflow-y: hidden;
+                border-radius: 12px;
+                padding-bottom: 10px;
+                scrollbar-width: auto;
+                scrollbar-color: #94a3b8 #eef2f6;
+            }}
+            .matriz-scroll::-webkit-scrollbar {{
+                height: 14px;
+                -webkit-appearance: none;
+                display: block;
+            }}
+            .matriz-scroll::-webkit-scrollbar-track {{
+                background: #eef2f6;
+                border-radius: 999px;
+                margin: 0 4px;
+                border: 1px solid #e2e8f0;
+            }}
+            .matriz-pct .matriz-scroll::-webkit-scrollbar-thumb {{
+                background: linear-gradient(90deg, #0e7490, #6d28d9);
+                border-radius: 999px;
+                border: 3px solid #eef2f6;
+                min-width: 60px;
+            }}
+            .matriz-money .matriz-scroll::-webkit-scrollbar-thumb {{
+                background: linear-gradient(90deg, #b45309, #15803d);
+                border-radius: 999px;
+                border: 3px solid #eef2f6;
+                min-width: 60px;
+            }}
+            .matriz-scroll::-webkit-scrollbar-thumb:hover {{
+                filter: brightness(1.12);
+            }}
+            
+            /* Tabla matriz */
+            .matriz-tabla {{
+                border-collapse: separate;
+                border-spacing: 6px;
+                width: max-content;
+                min-width: 100%;
+            }}
+            .matriz-tabla th, .matriz-tabla td {{
+                padding: 0;
+                text-align: center;
+                white-space: nowrap;
+            }}
+            
+            /* Encabezado de períodos (fila superior) — claro y elegante */
+            .matriz-tabla thead th {{
+                position: sticky;
+                top: 0;
+                z-index: 3;
+                background: #f8fafc;
+                color: #64748b;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 9px 14px;
+                letter-spacing: 0.4px;
+                border-radius: 9px;
+                border: 1px solid #e9edf2;
+            }}
+            .matriz-tabla thead th:first-child {{
+                left: 0;
+                z-index: 5;
+                text-align: left;
+                padding-left: 16px;
+                background: #ffffff;
+            }}
+            /* Resaltar columna del año (diciembre) — dorado sutil */
+            .matriz-tabla thead th.cierre-anual {{
+                background: #fffbeb;
+                color: #b45309;
+                font-weight: 700;
+                border-color: #fde68a;
+            }}
+            /* Resaltar el último período cargado */
+            .matriz-tabla thead th.ultimo-periodo {{
+                background: #ecfeff;
+                color: #0e7490;
+                font-weight: 700;
+                border-color: #a5f3fc;
+            }}
+            
+            /* Primera columna fija (nombre del indicador) */
+            .matriz-tabla .col-indicador {{
+                position: sticky;
+                left: 0;
+                z-index: 2;
+                background: #ffffff;
+                text-align: left;
+                padding: 0 14px;
+                min-width: 200px;
+                max-width: 200px;
+                border-radius: 10px;
+                box-shadow: 4px 0 10px -6px rgba(0,0,0,0.12);
+            }}
+            
+            .col-indicador-inner {{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 12px 0;
+            }}
+            .col-indicador-punto {{
+                width: 9px;
+                height: 9px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }}
+            .col-indicador-txt {{
+                display: flex;
+                flex-direction: column;
+                line-height: 1.25;
+            }}
+            .col-indicador-nombre {{
+                font-size: 12.5px;
+                font-weight: 700;
+                color: #334155;
+            }}
+            .col-indicador-modulo {{
+                font-size: 9px;
+                font-weight: 600;
+                color: #b0b8c4;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+            }}
+            
+            /* Celdas de datos — etiqueta clara con borde neón sutil */
+            .matriz-celda {{
+                font-size: 12.5px;
+                font-weight: 700;
+                padding: 9px 12px;
+                color: #334155;
+                min-width: 84px;
+                background: #ffffff;
+                border: 1.5px solid var(--neon, #e2e8f0);
+                border-radius: 10px;
+                transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.18s;
+                position: relative;
+            }}
+            /* Glow neón sutil según estado de la celda (variable --neon e --glow inyectadas inline) */
+            .matriz-celda:hover {{
+                transform: translateY(-3px) scale(1.04);
+                z-index: 4;
+                box-shadow: 0 6px 18px var(--glow, rgba(0,0,0,0.12));
+            }}
+            .matriz-celda.cierre-anual {{
+                background: #fffdf5;
+            }}
+            .matriz-celda.ultimo-periodo {{
+                background: #f7feff;
+                box-shadow: 0 0 0 1px #a5f3fc;
+            }}
+            
+            .matriz-celda-valor {{
+                display: block;
+                line-height: 1.1;
+            }}
+            /* Variación vs período anterior — esquina inferior de la celda */
+            .matriz-celda-var {{
+                display: inline-flex;
+                align-items: center;
+                gap: 1px;
+                font-size: 9px;
+                font-weight: 700;
+                margin-top: 3px;
+                letter-spacing: 0.1px;
+            }}
+            .var-sube  {{ color: #16a34a; }}
+            .var-baja  {{ color: #dc2626; }}
+            .var-igual {{ color: #94a3b8; }}
+            
+            /* Filas clickables */
+            .matriz-fila {{
+                cursor: pointer;
+            }}
+            .matriz-fila:hover .col-indicador {{
+                background: #f8fafc;
+            }}
+            
+            /* Separador de sección temática dentro de la matriz */
+            .matriz-seccion-row td {{
+                background: transparent;
+                color: #94a3b8;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 1.2px;
+                padding: 12px 6px 4px;
+                text-align: left;
+                position: sticky;
+                left: 0;
+            }}
+            
+            @media (max-width: 768px) {{
+                .matriz-tabla .col-indicador {{ min-width: 150px; max-width: 150px; }}
+                .col-indicador-nombre {{ font-size: 11px; }}
+                .tablero-titulo {{ font-size: 21px; }}
             }}
             
             /* Pantalla "Próximamente" (modal-style) */
@@ -5425,6 +5725,44 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                 </div>
                 
+            </div>
+            
+            <!-- ========== TABLERO RESUMEN: 2 MATRICES DE INDICADORES ========== -->
+            <div class="tablero-resumen">
+                <div class="tablero-header">
+                    <h2 class="tablero-titulo">Tablero de Indicadores</h2>
+                    <p class="tablero-sub">Resultados de todos los indicadores en cada período · <span id="tablero-rango">—</span></p>
+                </div>
+                
+                <!-- MATRIZ 1: INDICADORES EN PORCENTAJE -->
+                <div class="matriz-card matriz-pct">
+                    <div class="matriz-card-head">
+                        <div class="matriz-card-ico">%</div>
+                        <div>
+                            <h3>Indicadores (%)</h3>
+                            <span>Razones financieras · heatmap por fila</span>
+                        </div>
+                    </div>
+                    <div class="matriz-scroll" id="matriz-pct-scroll">
+                        <table class="matriz-tabla" id="matriz-pct-tabla"></table>
+                    </div>
+                    <div class="matriz-hint">↔ Desplázate horizontalmente para ver todos los períodos · Haz clic en una fila para abrir el módulo</div>
+                </div>
+                
+                <!-- MATRIZ 2: SALDOS Y RESULTADOS EN MILLONES -->
+                <div class="matriz-card matriz-money">
+                    <div class="matriz-card-head">
+                        <div class="matriz-card-ico">$</div>
+                        <div>
+                            <h3>Saldos y Resultados (Millones COP)</h3>
+                            <span>Estructura financiera y estado de resultados · heatmap por fila</span>
+                        </div>
+                    </div>
+                    <div class="matriz-scroll" id="matriz-money-scroll">
+                        <table class="matriz-tabla" id="matriz-money-tabla"></table>
+                    </div>
+                    <div class="matriz-hint">↔ Desplázate horizontalmente para ver todos los períodos · Haz clic en una fila para abrir el módulo</div>
+                </div>
             </div>
         </div>
         
@@ -15954,8 +16292,261 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // (El DOMContentLoaded original queda vacío: el dashboard se inicializa
         //  cuando el usuario hace clic en "Solvencia" desde el menú principal)
         document.addEventListener('DOMContentLoaded', () => {{
-            // Menú principal visible por defecto, dashboard oculto
+            // Construir el tablero resumen (2 matrices de indicadores)
+            try {{ construirTableroResumen(); }} catch(e) {{ console.error('Error tablero:', e); }}
         }});
+        
+        // ============================================================
+        // ========== TABLERO RESUMEN · 2 MATRICES ==========
+        // ============================================================
+        function construirTableroResumen() {{
+            // Etiquetas de períodos (tomadas de DATOS_MOROSIDAD que tiene los 60)
+            const periodos = DATOS_MOROSIDAD.map(r => ({{
+                corto: `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0,3)}}-${{String(r.anio).substring(2)}}`,
+                largo: `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`,
+                esCierre: r.mes === 'DICIEMBRE'
+            }}));
+            const N = periodos.length;
+            
+            // Rango en el header
+            if (N > 0) {{
+                document.getElementById('tablero-rango').textContent =
+                    `${{periodos[0].largo}} → ${{periodos[N-1].largo}} (${{N}} períodos)`;
+            }}
+            
+            // Formateadores
+            const fmtPct = (v) => (v === null || v === undefined) ? '—' :
+                v.toFixed(2).replace('.', ',') + '%';
+            const fmtMill = (v) => (v === null || v === undefined) ? '—' :
+                new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}).format(v);
+            
+            // ===== Borde neón sutil según estado de la celda (relativo a la fila) =====
+            // modo 'bueno_alto': valores altos = neón verde · 'bueno_bajo': bajos = verde
+            // modo 'neutro': usa el color del módulo (sutil, constante)
+            function neonCelda(v, min, max, modo, baseHex) {{
+                if (v === null || v === undefined) return {{ borde: '#eef0f3', glow: 'rgba(0,0,0,0.05)' }};
+                if (modo === 'neutro') {{
+                    return {{ borde: baseHex + '55', glow: baseHex + '33' }};
+                }}
+                if (max === min) return {{ borde: '#cbd5e1', glow: 'rgba(148,163,184,0.25)' }};
+                let t = (v - min) / (max - min);
+                if (modo === 'bueno_bajo') t = 1 - t;
+                // rojo (239,68,68) → ámbar (245,158,11) → verde (22,163,74)
+                let r, g, b;
+                if (t < 0.5) {{
+                    const k = t / 0.5;
+                    r = Math.round(239 + (245-239)*k);
+                    g = Math.round(68  + (158-68)*k);
+                    b = Math.round(68  + (11-68)*k);
+                }} else {{
+                    const k = (t - 0.5) / 0.5;
+                    r = Math.round(245 + (22-245)*k);
+                    g = Math.round(158 + (163-158)*k);
+                    b = Math.round(11  + (74-11)*k);
+                }}
+                return {{ borde: `rgba(${{r}},${{g}},${{b}},0.55)`, glow: `rgba(${{r}},${{g}},${{b}},0.32)` }};
+            }}
+            
+            // ===== Variación vs período anterior =====
+            // Para indicadores normales: ▲ verde si sube, ▼ rojo si baja
+            // invertirVar=true (mora, riesgo): ▲ rojo si sube (malo), ▼ verde si baja (bueno)
+            // unidad: 'pts' (puntos %), 'pb' (puntos básicos = delta*100), '%' (cambio relativo para montos)
+            function badgeVariacion(actual, anterior, unidad, invertir) {{
+                if (actual === null || actual === undefined || anterior === null || anterior === undefined || anterior === 0) {{
+                    return '';
+                }}
+                const delta = actual - anterior;
+                if (Math.abs(delta) < 1e-9) {{
+                    return `<span class="matriz-celda-var var-igual">▬ 0</span>`;
+                }}
+                const sube = delta > 0;
+                let clase;
+                if (invertir) clase = sube ? 'var-baja' : 'var-sube';
+                else clase = sube ? 'var-sube' : 'var-baja';
+                const flecha = sube ? '▲' : '▼';
+                let txt;
+                if (unidad === 'pb') {{
+                    // Puntos básicos: delta (en puntos %) × 100
+                    const pb = delta * 100;
+                    txt = (sube ? '+' : '') + Math.round(pb).toString() + ' pb';
+                }} else if (unidad === 'pts') {{
+                    txt = (sube ? '+' : '') + delta.toFixed(2).replace('.', ',') + ' pts';
+                }} else {{
+                    // '%': cambio relativo (para montos)
+                    const pctCambio = (delta / Math.abs(anterior)) * 100;
+                    txt = (sube ? '+' : '') + pctCambio.toFixed(1).replace('.', ',') + '%';
+                }}
+                return `<span class="matriz-celda-var ${{clase}}">${{flecha}} ${{txt}}</span>`;
+            }}
+            
+            // ===== Helpers para construir series derivadas =====
+            // Extrae el saldo de una subcuenta (código de 2 dígitos) de un array de evolución
+            function serieSubcuenta(datosEvol, codigo) {{
+                return datosEvol.map(r => {{
+                    const sub = (r.subcuentas || []).find(s => s.codigo === codigo);
+                    return sub ? sub.saldo : null;
+                }});
+            }}
+            // Cartera total del módulo de mora
+            const SERIE_CARTERA_TOTAL = DATOS_MOROSIDAD.map(r => r.total_general || null);
+            // Subcuentas del Activo
+            const SERIE_CARTERA_14 = serieSubcuenta(DATOS_EVOLUCION_ACTIVO, '14');
+            const SERIE_EFECTIVO_11 = serieSubcuenta(DATOS_EVOLUCION_ACTIVO, '11');
+            const SERIE_INVERSIONES_12 = serieSubcuenta(DATOS_EVOLUCION_ACTIVO, '12');
+            const SERIE_CXC_16 = serieSubcuenta(DATOS_EVOLUCION_ACTIVO, '16');
+            // Subcuenta del Pasivo
+            const SERIE_DEPOSITOS_21 = serieSubcuenta(DATOS_EVOLUCION_PASIVO, '21');
+            // Subcuentas del Patrimonio
+            const SERIE_CAPITAL_31 = serieSubcuenta(DATOS_EVOLUCION_PATRIMONIO, '31');
+            const SERIE_RESERVAS_32 = serieSubcuenta(DATOS_EVOLUCION_PATRIMONIO, '32');
+            
+            // Crecimiento interanual (vs mismo mes año anterior) para una serie de saldos
+            function crecimientoInteranual(datosEvol) {{
+                return datosEvol.map(r => {{
+                    const aa = r.saldo_anio_anterior;
+                    if (!aa || aa === 0) return null;
+                    return ((r.saldo_actual / aa) - 1) * 100; // en %
+                }});
+            }}
+            const SERIE_CREC_PASIVO = crecimientoInteranual(DATOS_EVOLUCION_PASIVO);
+            const SERIE_CREC_PATRIMONIO = crecimientoInteranual(DATOS_EVOLUCION_PATRIMONIO);
+            
+            // ===== Indicadores de rentabilidad (en %) =====
+            // Excedente y bases vienen de ICG / evolución. Alineados por índice de período.
+            const SERIE_ROE = DATOS_ICG.map((r, i) => {{
+                const pat = DATOS_EVOLUCION_PATRIMONIO[i]?.saldo_actual;
+                return (pat && pat !== 0) ? (r.excedente / pat) * 100 : null;
+            }});
+            const SERIE_ROA = DATOS_ICG.map((r, i) => {{
+                const act = DATOS_EVOLUCION_ACTIVO[i]?.saldo_actual;
+                return (act && act !== 0) ? (r.excedente / act) * 100 : null;
+            }});
+            const SERIE_MARGEN = DATOS_ICG.map(r =>
+                (r.ingresos && r.ingresos !== 0) ? (r.excedente / r.ingresos) * 100 : null);
+            const SERIE_EFICIENCIA = DATOS_ICG.map(r =>
+                (r.ingresos && r.ingresos !== 0) ? (r.gastos_sin_excedente / r.ingresos) * 100 : null);
+            
+            // Índice del primer mes "comparable" para ICG/rentabilidad:
+            // como son acumulados YTD, la variación arranca en el 2º mes del primer año fiscal disponible.
+            // Buscamos el primer FEBRERO (o el 2º período si no hay febrero al inicio).
+            // Regla: la variación de un período solo se muestra si el mes NO es ENERO.
+            function esEnero(i) {{ return DATOS_ICG[i] && DATOS_ICG[i].mes === 'ENERO'; }}
+            
+            // ===== Definición de filas de cada matriz =====
+            // serie: array · fmt · unidad ('pts'|'pb'|'%') · modo neón · invertir · varDesdeFebrero
+            const FILAS_PCT = [
+                {{ seccion: 'Solvencia y Liquidez' }},
+                {{ nombre: 'Solvencia', modulo: 'Solvencia', serie: SERIE_SOLVENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#15803d', click: 'abrirSolvencia' }},
+                {{ seccion: 'Calidad de Cartera' }},
+                {{ nombre: 'Índice de Mora', modulo: 'Activo · Mora', serie: SERIE_INDICE_MORA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#dc2626', click: 'abrirIndiceMora' }},
+                {{ nombre: 'Calidad de Cartera', modulo: 'Activo · Riesgo', serie: SERIE_CALIDAD_CARTERA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#1e40af', click: 'abrirIndiceRiesgo' }},
+                {{ nombre: 'Cobertura', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_TOTAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#0d9488', click: 'abrirCobertura' }},
+                {{ nombre: 'Cobertura c/Prov. Gral', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_CON_GRAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#115e59', click: 'abrirCobertura' }},
+                {{ seccion: 'Rentabilidad' }},
+                {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#0891b2', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#0d9488', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#6d28d9', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Eficiencia', modulo: 'Gastos / Ingresos', serie: SERIE_EFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, varDesdeFebrero: true, punto: '#c2410c', click: 'abrirEvolucionICG' }},
+            ];
+            
+            const FILAS_MONEY = [
+                {{ seccion: 'Estructura — Activo' }},
+                {{ nombre: 'Activo', modulo: 'Activo', serie: SERIE_EVOLUCION_ACTIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#06b6d4', punto: '#06b6d4', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Cartera Total', modulo: 'Activo · Mora', serie: SERIE_CARTERA_TOTAL, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0ea5e9', punto: '#0ea5e9', click: 'abrirIndiceMora' }},
+                {{ nombre: 'Cartera de Créditos', modulo: 'Activo · Cuenta 14', serie: SERIE_CARTERA_14, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0284c7', punto: '#0284c7', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Efectivo y Equivalente', modulo: 'Activo · Cuenta 11', serie: SERIE_EFECTIVO_11, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#06b6d4', punto: '#06b6d4', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Inversiones', modulo: 'Activo · Cuenta 12', serie: SERIE_INVERSIONES_12, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0891b2', punto: '#0891b2', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Cuentas por Cobrar', modulo: 'Activo · Cuenta 16', serie: SERIE_CXC_16, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#155e75', punto: '#155e75', click: 'abrirEvolucionActivo' }},
+                {{ seccion: 'Estructura — Pasivo' }},
+                {{ nombre: 'Pasivo', modulo: 'Pasivo', serie: SERIE_EVOLUCION_PASIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#f59e0b', punto: '#f59e0b', click: 'abrirEvolucionPasivo' }},
+                {{ nombre: 'Depósitos', modulo: 'Pasivo · Cuenta 21', serie: SERIE_DEPOSITOS_21, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#d97706', punto: '#d97706', click: 'abrirEvolucionPasivo' }},
+                {{ seccion: 'Estructura — Patrimonio' }},
+                {{ nombre: 'Patrimonio', modulo: 'Patrimonio', serie: SERIE_EVOLUCION_PATRIMONIO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#8b5cf6', punto: '#8b5cf6', click: 'abrirEvolucionPatrimonio' }},
+                {{ nombre: 'Capital Social', modulo: 'Patrimonio · Cuenta 31', serie: SERIE_CAPITAL_31, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#7c3aed', punto: '#7c3aed', click: 'abrirEvolucionPatrimonio' }},
+                {{ nombre: 'Reservas', modulo: 'Patrimonio · Cuenta 32', serie: SERIE_RESERVAS_32, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#6d28d9', punto: '#6d28d9', click: 'abrirEvolucionPatrimonio' }},
+                {{ seccion: 'Estado de Resultados' }},
+                {{ nombre: 'Ingresos', modulo: 'Ingresos', serie: SERIE_ICG_INGRESOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#15803d', punto: '#15803d', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Costos', modulo: 'Ingresos', serie: SERIE_ICG_COSTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#c2410c', punto: '#c2410c', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Gastos', modulo: 'Ingresos', serie: SERIE_ICG_GASTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#dc2626', punto: '#dc2626', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Excedente', modulo: 'Ingresos', serie: SERIE_ICG_EXCEDENTE, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#6d28d9', punto: '#6d28d9', click: 'abrirEvolucionICG' }},
+            ];
+            
+            // ===== Construye una tabla matriz dado el array de filas =====
+            function construirMatriz(tablaId, filas) {{
+                const tabla = document.getElementById(tablaId);
+                if (!tabla) return;
+                
+                const ultimoIdx = N - 1;
+                
+                // THEAD
+                let thead = '<thead><tr>';
+                thead += '<th>Indicador</th>';
+                periodos.forEach((p, i) => {{
+                    let cls = '';
+                    if (i === ultimoIdx) cls = 'ultimo-periodo';
+                    else if (p.esCierre) cls = 'cierre-anual';
+                    thead += `<th class="${{cls}}" title="${{p.largo}}">${{p.corto}}</th>`;
+                }});
+                thead += '</tr></thead>';
+                
+                // TBODY
+                let tbody = '<tbody>';
+                filas.forEach(fila => {{
+                    if (fila.seccion) {{
+                        tbody += `<tr class="matriz-seccion-row"><td colspan="${{N + 1}}">${{fila.seccion}}</td></tr>`;
+                        return;
+                    }}
+                    const valores = fila.serie.filter(v => v !== null && v !== undefined);
+                    const min = Math.min(...valores);
+                    const max = Math.max(...valores);
+                    
+                    tbody += `<tr class="matriz-fila" onclick="${{fila.click}}()">`;
+                    tbody += `<td class="col-indicador">
+                        <div class="col-indicador-inner">
+                            <span class="col-indicador-punto" style="background:${{fila.punto}}"></span>
+                            <span class="col-indicador-txt">
+                                <span class="col-indicador-nombre">${{fila.nombre}}</span>
+                                <span class="col-indicador-modulo">${{fila.modulo}}</span>
+                            </span>
+                        </div>
+                    </td>`;
+                    
+                    fila.serie.forEach((v, i) => {{
+                        const neon = neonCelda(v, min, max, fila.modo, fila.baseHex);
+                        // Variación: por defecto vs período anterior.
+                        // Si varDesdeFebrero, NO mostrar variación cuando el mes es ENERO
+                        // (los acumulados YTD reinician en enero y no son comparables con diciembre).
+                        let badge = '';
+                        const ocultarPorEnero = fila.varDesdeFebrero && esEnero(i);
+                        if (i > 0 && !ocultarPorEnero) {{
+                            const anterior = fila.serie[i-1];
+                            badge = badgeVariacion(v, anterior, fila.unidad, fila.invertir);
+                        }}
+                        let cls = 'matriz-celda';
+                        if (i === ultimoIdx) cls += ' ultimo-periodo';
+                        else if (periodos[i].esCierre) cls += ' cierre-anual';
+                        tbody += `<td class="${{cls}}" style="--neon:${{neon.borde}};--glow:${{neon.glow}}" title="${{fila.nombre}} · ${{periodos[i].largo}}">
+                            <span class="matriz-celda-valor">${{fila.fmt(v)}}</span>${{badge}}
+                        </td>`;
+                    }});
+                    tbody += '</tr>';
+                }});
+                tbody += '</tbody>';
+                
+                tabla.innerHTML = thead + tbody;
+            }}
+            
+            construirMatriz('matriz-pct-tabla', FILAS_PCT);
+            construirMatriz('matriz-money-tabla', FILAS_MONEY);
+            
+            // Auto-scroll al final (período más reciente) en ambas matrices
+            setTimeout(() => {{
+                ['matriz-pct-scroll', 'matriz-money-scroll'].forEach(id => {{
+                    const el = document.getElementById(id);
+                    if (el) el.scrollLeft = el.scrollWidth;
+                }});
+            }}, 150);
+        }}
         </script>
     </body>
     </html>
@@ -21843,3 +22434,10 @@ if __name__ == "__main__":
 # nVpm6zrkcumvazbkRG/OvxybLV+K5vasvXVl216KHYsOnySOhUUlH/b4e7sklg7WI39QwX0uYGUDnbyH
 # UlZkqE4r7/4v5I+iawA1EgA=
 #@BUNDLE_DATA_END@#
+import subprocess
+from datetime import datetime
+fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
+subprocess.run("git add -A", shell=True)
+subprocess.run(f'git commit -m "Dashboard actualizado {fecha}"', shell=True)
+subprocess.run("git push origin main", shell=True)
+print("✅ Publicado en GitHub automáticamente")
