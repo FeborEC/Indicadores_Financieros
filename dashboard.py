@@ -4087,6 +4087,107 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 text-align: center;
                 margin-bottom: 22px;
             }}
+            /* ===== Panel de generación de informe PDF ===== */
+            .informe-panel {{
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 18px;
+                background: linear-gradient(135deg, #EEF2F6 0%, #E8EDF3 100%);
+                border: 1px solid #E6E8F1;
+                border-radius: 14px;
+                padding: 16px 20px;
+                margin-bottom: 24px;
+            }}
+            .informe-panel-info {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }}
+            .informe-panel-ico {{
+                font-size: 26px;
+                line-height: 1;
+                flex: 0 0 auto;
+            }}
+            .informe-panel-titulo {{
+                font-size: 15px;
+                font-weight: 700;
+                color: #1c2520;
+            }}
+            .informe-panel-sub {{
+                font-size: 12.5px;
+                color: #6b7268;
+                margin-top: 2px;
+                max-width: 420px;
+            }}
+            .informe-panel-controles {{
+                display: flex;
+                align-items: flex-end;
+                gap: 12px;
+                flex-wrap: wrap;
+            }}
+            .informe-campo {{
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }}
+            .informe-campo label {{
+                font-size: 10.5px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #6b7268;
+                padding-left: 2px;
+            }}
+            .informe-campo select {{
+                font-family: 'Poppins', sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                color: #1c2520;
+                padding: 8px 12px;
+                border: 1.5px solid #d4d9e3;
+                border-radius: 9px;
+                background: #ffffff;
+                cursor: pointer;
+                min-width: 130px;
+            }}
+            .informe-campo select:focus {{
+                outline: none;
+                border-color: #4D61B4;
+            }}
+            .btn-informe {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: linear-gradient(135deg, #4D61B4 0%, #33417C 100%);
+                color: #ffffff;
+                border: none;
+                border-radius: 9px;
+                padding: 10px 20px;
+                font-family: 'Poppins', sans-serif;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 14px rgba(77,97,180,0.30);
+                height: 40px;
+            }}
+            .btn-informe:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 6px 20px rgba(77,97,180,0.42);
+            }}
+            .btn-informe:disabled {{
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }}
+            @media (max-width: 680px) {{
+                .informe-panel {{ flex-direction: column; align-items: stretch; }}
+                .informe-panel-controles {{ justify-content: stretch; }}
+                .informe-campo {{ flex: 1; }}
+                .informe-campo select {{ width: 100%; }}
+            }}
             .tablero-titulo {{
                 font-size: 26px;
                 font-weight: 800;
@@ -5470,6 +5571,85 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: relative;
                 width: 100%;
             }}
+            /* ===== Cards elegantes de totales de Depósitos ===== */
+            .dep-total-cards {{
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 14px;
+                margin: 4px 0 24px;
+            }}
+            .dep-total-card {{
+                position: relative;
+                background: linear-gradient(150deg, rgba(var(--c-rgb),0.10) 0%, rgba(var(--c-rgb),0.02) 60%, #ffffff 100%);
+                border: 1px solid rgba(var(--c-rgb),0.22);
+                border-radius: 16px;
+                padding: 16px 16px 14px;
+                box-shadow: 0 2px 10px rgba(var(--c-rgb),0.10);
+                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                overflow: hidden;
+            }}
+            .dep-total-card::before {{
+                content: '';
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 3px;
+                background: var(--c);
+            }}
+            .dep-total-card:hover {{
+                transform: translateY(-3px);
+                box-shadow: 0 10px 26px rgba(var(--c-rgb),0.24);
+            }}
+            .dep-total-card-top {{
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 10px;
+            }}
+            .dep-total-card-dot {{
+                width: 10px; height: 10px;
+                border-radius: 50%;
+                background: var(--c);
+                flex: 0 0 auto;
+                box-shadow: 0 0 0 3px rgba(var(--c-rgb),0.15);
+            }}
+            .dep-total-card-label {{
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+                text-transform: uppercase;
+                color: #6b7268;
+                line-height: 1.2;
+            }}
+            .dep-total-card-valor {{
+                font-size: 26px;
+                font-weight: 800;
+                letter-spacing: -0.5px;
+                color: var(--c);
+                line-height: 1.1;
+                margin-bottom: 8px;
+            }}
+            .dep-total-card-foot {{
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+            }}
+            .dep-total-card-ref {{
+                color: #a0a59c;
+                font-style: italic;
+            }}
+            .dep-total-card--principal .dep-total-card-valor {{
+                font-size: 28px;
+            }}
+            @media (max-width: 1100px) {{
+                .dep-total-cards {{ grid-template-columns: repeat(3, 1fr); }}
+            }}
+            @media (max-width: 680px) {{
+                .dep-total-cards {{ grid-template-columns: repeat(2, 1fr); }}
+            }}
+            @media (max-width: 460px) {{
+                .dep-total-cards {{ grid-template-columns: 1fr; }}
+            }}
             /* ===== Cuadrícula 2x2 del módulo Crecimiento de Depósitos ===== */
             .dep-grid-2x2 {{
                 display: grid;
@@ -6039,6 +6219,30 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <p class="tablero-sub">Resultados de todos los indicadores en cada período · <span id="tablero-rango">—</span></p>
                 </div>
                 
+                <!-- Panel: generar informe PDF del tablero -->
+                <div class="informe-panel">
+                    <div class="informe-panel-info">
+                        <div class="informe-panel-ico">📄</div>
+                        <div>
+                            <div class="informe-panel-titulo">Informe Analítico en PDF</div>
+                            <div class="informe-panel-sub">Describe el comportamiento y variaciones de los indicadores en el rango elegido</div>
+                        </div>
+                    </div>
+                    <div class="informe-panel-controles">
+                        <div class="informe-campo">
+                            <label for="informe-desde">Desde</label>
+                            <select id="informe-desde"></select>
+                        </div>
+                        <div class="informe-campo">
+                            <label for="informe-hasta">Hasta</label>
+                            <select id="informe-hasta"></select>
+                        </div>
+                        <button class="btn-informe" id="btn-informe" onclick="generarInformeTablero()">
+                            <span>Generar Informe</span>
+                        </button>
+                    </div>
+                </div>
+                
                 <!-- MATRIZ 1: INDICADORES EN PORCENTAJE -->
                 <div class="matriz-card matriz-pct">
                     <div class="matriz-card-head">
@@ -6264,7 +6468,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- KPIs -->
-            <div class="evo-kpis" id="depositos-kpis"></div>
+            <div class="dep-total-cards" id="depositos-kpis"></div>
             
             <!-- Gráfico histórico TOTAL (grande) -->
             <div class="section acc-graficos">
@@ -11197,22 +11401,36 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const totalVal = modo === 'capital' ? r.total_capital : r.total_depositos;
             const crecTotal = crecTotalSerie[idx];
             
+            // Convierte un hex en componentes rgb para fondos translúcidos
+            function _hexRgbDep(hex) {{
+                const h = hex.replace('#','');
+                return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
+            }}
+            
+            const [tr, tg, tb] = _hexRgbDep(DEP_COLOR_TOTAL);
             let kpisHtml = `
-                <div class="evo-kpi-card" style="border-left:4px solid #A75A00;">
-                    <span class="evo-kpi-label">TOTAL DEPOSITOS</span>
-                    <span class="evo-kpi-valor" style="color:#A75A00;">${{fmtDepMill(totalVal)}}</span>
-                    <span class="evo-kpi-sub">${{badgeCrecDep(crecTotal)}} vs mes anterior</span>
+                <div class="dep-total-card dep-total-card--principal" style="--c:${{DEP_COLOR_TOTAL}}; --c-rgb:${{tr}},${{tg}},${{tb}};">
+                    <div class="dep-total-card-top">
+                        <span class="dep-total-card-dot"></span>
+                        <span class="dep-total-card-label">Total Depósitos</span>
+                    </div>
+                    <div class="dep-total-card-valor">${{fmtDepMill(totalVal)}}</div>
+                    <div class="dep-total-card-foot">${{badgeCrecDep(crecTotal)}} <span class="dep-total-card-ref">vs mes anterior</span></div>
                 </div>`;
             r.productos.forEach(p => {{
                 const serie = depSerieProducto(p.id, modo);
                 const crecSerie = depCrecimientoMensual(serie);
                 const val = depSaldoProducto(p, modo);
                 const color = DEP_COLORS[p.id] || '#64748b';
+                const [pr, pg, pb] = _hexRgbDep(color);
                 kpisHtml += `
-                    <div class="evo-kpi-card" style="border-left:4px solid ${{color}};">
-                        <span class="evo-kpi-label">${{p.nombre.toUpperCase()}}</span>
-                        <span class="evo-kpi-valor" style="color:${{color}};">${{fmtDepMill(val)}}</span>
-                        <span class="evo-kpi-sub">${{badgeCrecDep(crecSerie[idx])}} vs mes anterior</span>
+                    <div class="dep-total-card" style="--c:${{color}}; --c-rgb:${{pr}},${{pg}},${{pb}};">
+                        <div class="dep-total-card-top">
+                            <span class="dep-total-card-dot"></span>
+                            <span class="dep-total-card-label">${{p.nombre}}</span>
+                        </div>
+                        <div class="dep-total-card-valor">${{fmtDepMill(val)}}</div>
+                        <div class="dep-total-card-foot">${{badgeCrecDep(crecSerie[idx])}} <span class="dep-total-card-ref">vs mes anterior</span></div>
                     </div>`;
             }});
             document.getElementById('depositos-kpis').innerHTML = kpisHtml;
@@ -17222,6 +17440,383 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // ============================================================
         // ========== TABLERO RESUMEN · 2 MATRICES ==========
         // ============================================================
+        // =====================================================================
+        // INFORME ANALÍTICO EN PDF DEL TABLERO DE INDICADORES
+        // ---------------------------------------------------------------------
+        // Recorre los indicadores del tablero (% y $), calcula valor actual,
+        // variación vs mes anterior, vs año anterior y tendencia reciente, y
+        // redacta un informe descriptivo basado en reglas. 100% offline (jsPDF).
+        // =====================================================================
+
+        // Pobla los selectores Desde/Hasta con los períodos disponibles.
+        function poblarSelectoresInforme() {{
+            const data = window.TABLERO_DATA;
+            if (!data || !data.periodos) return;
+            const desde = document.getElementById('informe-desde');
+            const hasta = document.getElementById('informe-hasta');
+            if (!desde || !hasta || desde.options.length > 0) return;
+            data.periodos.forEach((p, i) => {{
+                const o1 = document.createElement('option');
+                o1.value = i; o1.textContent = p.largo;
+                desde.appendChild(o1);
+                const o2 = document.createElement('option');
+                o2.value = i; o2.textContent = p.largo;
+                hasta.appendChild(o2);
+            }});
+            const N = data.periodos.length;
+            // Por defecto: últimos 12 meses (o todo si hay menos)
+            desde.value = Math.max(0, N - 12);
+            hasta.value = N - 1;
+        }}
+
+        // Capitaliza la primera letra de un texto
+        function _capitaliza(s) {{
+            if (!s) return s;
+            return s.charAt(0).toUpperCase() + s.slice(1);
+        }}
+        // Formateadores locales para el informe
+        function _fmtPctInf(v) {{
+            return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(2).replace('.', ',') + '%';
+        }}
+        function _fmtMillInf(v) {{
+            return (v === null || v === undefined || isNaN(v)) ? '—' :
+                new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}).format(v);
+        }}
+        // Texto de variación según unidad
+        function _txtVar(actual, anterior, unidad) {{
+            if (actual === null || anterior === null || actual === undefined || anterior === undefined || anterior === 0) return null;
+            const delta = actual - anterior;
+            const sube = delta > 0;
+            const signo = sube ? '+' : '';
+            if (unidad === 'pb') return signo + Math.round(delta * 100) + ' pb';
+            if (unidad === 'pts') return signo + delta.toFixed(2).replace('.', ',') + ' pts';
+            // '%' relativo (montos)
+            const pct = (delta / Math.abs(anterior)) * 100;
+            return signo + pct.toFixed(1).replace('.', ',') + '%';
+        }}
+        // Palabra de dirección considerando si "subir" es bueno o malo
+        function _dir(delta, invertir) {{
+            if (Math.abs(delta) < 1e-9) return 'se mantuvo estable';
+            const sube = delta > 0;
+            return sube ? 'aumentó' : 'disminuyó';
+        }}
+        // Encuentra el último índice con valor no nulo en [ini..fin]
+        function _ultimoValido(serie, ini, fin) {{
+            for (let i = fin; i >= ini; i--) {{
+                if (serie[i] !== null && serie[i] !== undefined && !isNaN(serie[i])) return i;
+            }}
+            return -1;
+        }}
+
+        // Construye el análisis de un indicador para el rango [iniIdx..finIdx]
+        function _analizarIndicador(ind, iniIdx, finIdx, periodos) {{
+            const serie = ind.serie;
+            const idxAct = _ultimoValido(serie, iniIdx, finIdx);
+            if (idxAct < 0) return null;
+            const valActual = serie[idxAct];
+            const fmt = ind.esPorcentaje ? _fmtPctInf : _fmtMillInf;
+
+            // Variación vs período anterior
+            let idxPrev = _ultimoValido(serie, 0, idxAct - 1);
+            let varMes = null, deltaMes = null;
+            if (idxPrev >= 0) {{
+                varMes = _txtVar(valActual, serie[idxPrev], ind.unidad);
+                deltaMes = valActual - serie[idxPrev];
+            }}
+            // Variación vs año anterior (12 períodos atrás)
+            let varAnio = null, deltaAnio = null;
+            const idxAA = idxAct - 12;
+            if (idxAA >= 0 && serie[idxAA] !== null && serie[idxAA] !== undefined && !isNaN(serie[idxAA]) && serie[idxAA] !== 0) {{
+                varAnio = _txtVar(valActual, serie[idxAA], ind.unidad);
+                deltaAnio = valActual - serie[idxAA];
+            }}
+            // Tendencia reciente: pendiente sobre la ventana [iniIdx..idxAct]
+            const ventana = [];
+            for (let i = iniIdx; i <= idxAct; i++) {{
+                if (serie[i] !== null && serie[i] !== undefined && !isNaN(serie[i])) ventana.push(serie[i]);
+            }}
+            let tendencia = 'sin variación apreciable';
+            let minV = null, maxV = null, minIdx = -1, maxIdx = -1;
+            if (ventana.length >= 2) {{
+                const prim = ventana[0], ult = ventana[ventana.length - 1];
+                const cambio = ult - prim;
+                const ref = ind.esPorcentaje ? 0.1 : Math.abs(prim) * 0.01;
+                if (Math.abs(cambio) <= ref) tendencia = 'una tendencia estable';
+                else tendencia = cambio > 0 ? 'una tendencia al alza' : 'una tendencia a la baja';
+                // máximos/mínimos de la ventana
+                for (let i = iniIdx; i <= idxAct; i++) {{
+                    const v = serie[i];
+                    if (v === null || v === undefined || isNaN(v)) continue;
+                    if (minV === null || v < minV) {{ minV = v; minIdx = i; }}
+                    if (maxV === null || v > maxV) {{ maxV = v; maxIdx = i; }}
+                }}
+            }}
+            return {{
+                nombre: ind.nombre, modulo: ind.modulo,
+                valActual: fmt(valActual), idxAct,
+                varMes, deltaMes, varAnio, deltaAnio,
+                tendencia, invertir: ind.invertir,
+                minV: minV !== null ? fmt(minV) : null, minIdx,
+                maxV: maxV !== null ? fmt(maxV) : null, maxIdx,
+                unidad: ind.unidad
+            }};
+        }}
+
+        // Redacta el párrafo descriptivo de un indicador
+        function _redactarParrafo(a, periodos) {{
+            if (!a) return '';
+            const pAct = periodos[a.idxAct] ? periodos[a.idxAct].largo : '';
+            let s = `${{a.nombre}} se ubicó en ${{a.valActual}} en ${{pAct}}`;
+            if (a.varMes !== null) {{
+                const palabra = _dir(a.deltaMes, a.invertir);
+                s += `, tras ${{palabra}} ${{a.varMes}} frente al período anterior`;
+            }}
+            s += '. ';
+            if (a.varAnio !== null) {{
+                const palabraA = _dir(a.deltaAnio, a.invertir);
+                s += `En términos interanuales ${{palabraA}} ${{a.varAnio}}. `;
+            }}
+            s += `Durante el rango analizado mostró ${{a.tendencia}}`;
+            if (a.minV !== null && a.maxV !== null && a.minIdx !== a.maxIdx) {{
+                const pMin = periodos[a.minIdx] ? periodos[a.minIdx].largo : '';
+                const pMax = periodos[a.maxIdx] ? periodos[a.maxIdx].largo : '';
+                s += `, oscilando entre un mínimo de ${{a.minV}} (${{pMin}}) y un máximo de ${{a.maxV}} (${{pMax}})`;
+            }}
+            s += '.';
+            return s;
+        }}
+
+        // Genera y descarga el informe PDF
+        function generarInformeTablero() {{
+            const data = window.TABLERO_DATA;
+            const btn = document.getElementById('btn-informe');
+            if (!data) {{ alert('Los datos del tablero aún no están listos. Intenta de nuevo en un momento.'); return; }}
+            if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {{
+                alert('No se pudo cargar el generador de PDF (jsPDF). Verifica tu conexión o la versión offline.');
+                return;
+            }}
+            const iniIdx = parseInt(document.getElementById('informe-desde').value, 10);
+            const finIdx = parseInt(document.getElementById('informe-hasta').value, 10);
+            if (isNaN(iniIdx) || isNaN(finIdx) || iniIdx > finIdx) {{
+                alert('El rango es inválido: el período "Desde" debe ser anterior o igual a "Hasta".');
+                return;
+            }}
+            const textoOrig = btn.querySelector('span').textContent;
+            btn.disabled = true;
+            btn.querySelector('span').textContent = 'Generando…';
+
+            try {{
+                const {{ jsPDF }} = window.jspdf;
+                const doc = new jsPDF({{ unit: 'pt', format: 'a4' }});
+                const W = doc.internal.pageSize.getWidth();
+                const H = doc.internal.pageSize.getHeight();
+                const MX = 48;            // margen izq/der
+                const MAXW = W - MX * 2;  // ancho útil
+                let y = 0;
+
+                const periodos = data.periodos;
+                const pIni = periodos[iniIdx].largo;
+                const pFin = periodos[finIdx].largo;
+                const nMeses = finIdx - iniIdx + 1;
+
+                // Colores de paleta (escala de azules de la imagen de referencia)
+                const C_AZUL = [19, 143, 199];     // #138FC7 azul de la escala
+                const C_AZUL_OSC = [16, 110, 160]; // azul más oscuro para contraste
+                const C_CIAN = [129, 213, 232];    // #81D5E8 cian claro de la escala
+                const C_OSCURO = [28, 37, 32];
+                const C_GRIS = [107, 114, 104];
+                const C_VERDE = [17, 120, 44];
+                const C_ROJO = [201, 26, 21];
+
+                // ---- helper salto de página ----
+                function checkPage(alturaNecesaria) {{
+                    if (y + alturaNecesaria > H - 56) {{
+                        pieDePagina();
+                        doc.addPage();
+                        y = 56;
+                        return true;
+                    }}
+                    return false;
+                }}
+                let numPagina = 0;
+                function pieDePagina() {{
+                    numPagina++;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(160, 165, 156);
+                    doc.text('Informe generado automáticamente desde el Dashboard Financiero Cooperativo', MX, H - 30);
+                    doc.text('Pág. ' + numPagina, W - MX, H - 30, {{ align: 'right' }});
+                }}
+
+                // ---- PORTADA / ENCABEZADO con degradado de la escala de azules ----
+                // Degradado horizontal: azul oscuro (izq) -> cian claro (der), dibujado en bandas.
+                const HEAD_H = 132;
+                const bandas = 120;
+                const bw = W / bandas;
+                for (let i = 0; i < bandas; i++) {{
+                    const t = i / (bandas - 1);
+                    const r = Math.round(C_AZUL_OSC[0] + (C_CIAN[0] - C_AZUL_OSC[0]) * t);
+                    const g = Math.round(C_AZUL_OSC[1] + (C_CIAN[1] - C_AZUL_OSC[1]) * t);
+                    const b = Math.round(C_AZUL_OSC[2] + (C_CIAN[2] - C_AZUL_OSC[2]) * t);
+                    doc.setFillColor(r, g, b);
+                    doc.rect(i * bw, 0, bw + 1, HEAD_H, 'F');
+                }}
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(22);
+                doc.setTextColor(255, 255, 255);
+                doc.text('Informe de Indicadores Financieros', MX, 58);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.text('Análisis del comportamiento y variaciones del tablero principal', MX, 80);
+                doc.setFontSize(10);
+                doc.text('Periodo analizado: ' + pIni + '  -  ' + pFin + '   (' + nMeses + ' meses)', MX, 104);
+                const hoy = new Date();
+                doc.text('Fecha de emisión: ' + hoy.toLocaleDateString('es-CO', {{ year: 'numeric', month: 'long', day: 'numeric' }}), MX, 120);
+                y = 164;
+
+                // ---- NOTA METODOLÓGICA ----
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(8.5);
+                doc.setTextColor(C_GRIS[0], C_GRIS[1], C_GRIS[2]);
+                const nota = 'Documento descriptivo de carácter informativo, generado a partir de los datos del tablero. ' +
+                    'No constituye asesoría financiera ni recomendación de inversión. Las variaciones "vs período anterior" ' +
+                    'comparan con el mes inmediatamente previo; las "interanuales" comparan con el mismo mes del año anterior (12 meses atrás).';
+                const notaLines = doc.splitTextToSize(nota, MAXW);
+                doc.text(notaLines, MX, y);
+                y += notaLines.length * 11 + 16;
+
+                // ---- FUNCIÓN PARA RENDERIZAR UNA SECCIÓN DE INDICADORES ----
+                function renderSeccion(titulo, indicadores) {{
+                    checkPage(60);
+                    // título de sección
+                    doc.setFillColor(230, 232, 241);
+                    doc.rect(MX, y, MAXW, 24, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(12);
+                    doc.setTextColor(C_AZUL[0], C_AZUL[1], C_AZUL[2]);
+                    doc.text(titulo, MX + 10, y + 16);
+                    y += 34;
+
+                    // Geometría de la tabla de 2 columnas: Métrica | Resultado
+                    const COL1 = Math.round(MAXW * 0.58);   // ancho columna "Métrica"
+                    const COL2 = MAXW - COL1;                 // ancho columna "Resultado"
+                    const ROW_H = 18;                         // alto de fila
+                    const PADX = 8;
+
+                    indicadores.forEach(ind => {{
+                        const a = _analizarIndicador(ind, iniIdx, finIdx, periodos);
+                        if (!a) return;
+
+                        // Construir las filas (métrica, resultado) de este indicador
+                        const filas = [];
+                        filas.push(['Valor de cierre (' + (periodos[a.idxAct] ? periodos[a.idxAct].largo : '') + ')', a.valActual]);
+                        if (a.varMes !== null) {{
+                            filas.push(['Variación vs período anterior', a.varMes]);
+                        }}
+                        if (a.varAnio !== null) {{
+                            filas.push(['Variación interanual (vs año anterior)', a.varAnio]);
+                        }}
+                        filas.push(['Tendencia en el rango', _capitaliza(a.tendencia)]);
+                        if (a.minV !== null && a.minIdx >= 0) {{
+                            filas.push(['Mínimo del rango', a.minV + '  (' + (periodos[a.minIdx] ? periodos[a.minIdx].largo : '') + ')']);
+                        }}
+                        if (a.maxV !== null && a.maxIdx >= 0) {{
+                            filas.push(['Máximo del rango', a.maxV + '  (' + (periodos[a.maxIdx] ? periodos[a.maxIdx].largo : '') + ')']);
+                        }}
+
+                        // Altura total del bloque: título indicador + cabecera tabla + filas
+                        const alturaBloque = 22 + ROW_H + filas.length * ROW_H + 16;
+                        checkPage(alturaBloque);
+
+                        // --- Nombre del indicador ---
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(12);
+                        doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                        doc.text(a.nombre, MX, y);
+                        y += 10;
+
+                        // --- Cabecera de la tabla: Métrica | Resultado ---
+                        doc.setFillColor(C_AZUL[0], C_AZUL[1], C_AZUL[2]);
+                        doc.rect(MX, y, COL1, ROW_H, 'F');
+                        doc.rect(MX + COL1, y, COL2, ROW_H, 'F');
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(12);
+                        doc.setTextColor(255, 255, 255);
+                        doc.text('Métrica', MX + PADX, y + 13);
+                        doc.text('Resultado', MX + COL1 + PADX, y + 13);
+                        y += ROW_H;
+
+                        // --- Filas de la tabla ---
+                        doc.setFontSize(12);
+                        filas.forEach((f, i) => {{
+                            // fondo alterno (zebra)
+                            if (i % 2 === 0) {{
+                                doc.setFillColor(245, 247, 250);
+                                doc.rect(MX, y, MAXW, ROW_H, 'F');
+                            }}
+                            // texto métrica
+                            doc.setFont('helvetica', 'normal');
+                            doc.setTextColor(70, 75, 70);
+                            doc.text(f[0], MX + PADX, y + 13);
+                            // texto resultado (en negrita)
+                            doc.setFont('helvetica', 'bold');
+                            doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                            doc.text(String(f[1]), MX + COL1 + PADX, y + 13);
+                            y += ROW_H;
+                        }});
+
+                        // --- Bordes de la tabla ---
+                        const filasTotal = filas.length + 1; // +cabecera
+                        const topTabla = y - filasTotal * ROW_H;
+                        doc.setDrawColor(214, 219, 227);
+                        doc.setLineWidth(0.5);
+                        // marco exterior
+                        doc.rect(MX, topTabla, MAXW, filasTotal * ROW_H);
+                        // línea divisoria de columnas
+                        doc.line(MX + COL1, topTabla, MX + COL1, topTabla + filasTotal * ROW_H);
+
+                        y += 16;
+                    }});
+                    y += 4;
+                }}
+
+                // ---- RESUMEN EJECUTIVO ----
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(14);
+                doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                doc.text('Resumen del período', MX, y);
+                y += 20;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(70, 75, 70);
+                const resumen = 'El presente informe describe la evolución de los indicadores del tablero principal entre ' +
+                    pIni + ' y ' + pFin + '. A continuación se detalla, para cada indicador, su valor de cierre, ' +
+                    'la variación respecto al período anterior, la comparación interanual cuando hay datos disponibles, ' +
+                    'y la tendencia observada en el rango seleccionado.';
+                const resLines = doc.splitTextToSize(resumen, MAXW);
+                doc.text(resLines, MX, y, {{ lineHeightFactor: 1.4 }});
+                y += resLines.length * 16 + 22;
+
+                // ---- SECCIONES ----
+                renderSeccion('Indicadores en porcentaje (razones financieras)', data.filasPct);
+                renderSeccion('Estructura financiera y resultados (millones COP)', data.filasMoney);
+
+                pieDePagina();
+
+                // ---- GUARDAR ----
+                const nombreArchivo = 'Informe_Indicadores_' +
+                    periodos[finIdx].corto.replace('-', '') + '.pdf';
+                doc.save(nombreArchivo);
+
+            }} catch (err) {{
+                console.error('Error generando informe PDF:', err);
+                alert('Ocurrió un error al generar el informe. Revisa la consola para más detalle.');
+            }} finally {{
+                btn.disabled = false;
+                btn.querySelector('span').textContent = textoOrig;
+            }}
+        }}
+
         function construirTableroResumen() {{
             // Etiquetas de períodos (tomadas de DATOS_MOROSIDAD que tiene los 60)
             const periodos = DATOS_MOROSIDAD.map(r => ({{
@@ -17462,6 +18057,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             construirMatriz('matriz-pct-tabla', FILAS_PCT);
             construirMatriz('matriz-money-tabla', FILAS_MONEY);
             
+            // ===== Exponer datos del tablero para el generador de informe PDF =====
+            // Guardamos períodos y, por cada indicador, su nombre/módulo/serie/unidad/modo.
+            // (Se omiten las funciones fmt; el generador formatea por su cuenta.)
+            window.TABLERO_DATA = {{
+                periodos: periodos,
+                filasPct: FILAS_PCT.filter(f => !f.seccion).map(f => ({{
+                    nombre: f.nombre, modulo: f.modulo, serie: f.serie,
+                    unidad: f.unidad, modo: f.modo, invertir: !!f.invertir,
+                    varDesdeFebrero: !!f.varDesdeFebrero, esPorcentaje: true
+                }})),
+                filasMoney: FILAS_MONEY.filter(f => !f.seccion).map(f => ({{
+                    nombre: f.nombre, modulo: f.modulo, serie: f.serie,
+                    unidad: f.unidad, modo: f.modo, invertir: !!f.invertir,
+                    varDesdeFebrero: !!f.varDesdeFebrero, esPorcentaje: false
+                }})),
+                seccionesPct: FILAS_PCT.map(f => f.seccion ? {{seccion: f.seccion}} : {{nombre: f.nombre}}),
+                seccionesMoney: FILAS_MONEY.map(f => f.seccion ? {{seccion: f.seccion}} : {{nombre: f.nombre}})
+            }};
+            
+            // Poblar los selectores del panel de informe PDF
+            try {{ poblarSelectoresInforme(); }} catch(e) {{ console.error('Error selectores informe:', e); }}
+            
             // Auto-scroll al final (período más reciente) en ambas matrices
             setTimeout(() => {{
                 ['matriz-pct-scroll', 'matriz-money-scroll'].forEach(id => {{
@@ -17484,16 +18101,45 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     return ruta_salida
 
 
+def _cargar_jspdf() -> str:
+    """
+    Carga jsPDF (UMD minificado) como bloque <script> inline para PDF offline.
+    Busca en libs_extra/, luego en node_modules/, y por último cae a CDN.
+    """
+    from pathlib import Path
+    carpeta_script = Path(__file__).parent
+    candidatos = [
+        carpeta_script / "libs_extra" / "jspdf.umd.min.js",
+        carpeta_script / "node_modules" / "jspdf" / "dist" / "jspdf.umd.min.js",
+        carpeta_script / "libs" / "jspdf.umd.min.js",
+    ]
+    for fpath in candidatos:
+        try:
+            if fpath.exists():
+                contenido = fpath.read_text(encoding="utf-8")
+                print(f"   OK: jsPDF embebido desde {fpath.parent.name}/ ({len(contenido) // 1024} KB)")
+                return f"<!-- jsPDF embebido -->\n<script>\n{contenido}\n</script>"
+        except Exception:
+            continue
+    print("   ATENCION: jsPDF no encontrado localmente. Usando CDN (requiere internet).")
+    return '<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>'
+
+
 def _cargar_librerias_js() -> str:
     """
     Lee las librerías JavaScript de la subcarpeta 'libs/' y las devuelve
-    como bloques <script> listos para insertar en el HTML.
+    como bloques <script> listos para insertar en el HTML. Incluye jsPDF
+    para la generación de informes en PDF offline.
     
     Si las librerías no se encuentran, intenta extraerlas desde el bundle
     embebido al final de este script (___LIBS_BUNDLE___).
     
     Si tampoco hay bundle, cae al modo CDN (requiere internet).
     """
+    return _cargar_librerias_js_base() + "\n" + _cargar_jspdf()
+
+
+def _cargar_librerias_js_base() -> str:
     from pathlib import Path
     
     carpeta_script = Path(__file__).parent
