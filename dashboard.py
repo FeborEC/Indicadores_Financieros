@@ -1442,6 +1442,112 @@ def calcular_crecimiento(df: pd.DataFrame, anio: int, mes: str) -> dict:
     }
 
 
+# ============================================================
+# CRECIMIENTO DE DEPÓSITOS (Pasivo)
+# ============================================================
+# Productos de captación y sus cuentas PUC:
+#   1. Ahorro a la Vista: total 210505 (disc. 210505001, 210505002), capital = 210505 - 210595
+#   2. CDAT: total 2110 (disc. 211005 <6m, 211010 6-12m, 211020 >=18m), capital = 2110 - 211095
+#   3. Ahorro Contractual: total 2125 (disc. 212505 corto, 212515 largo), capital = 2125 - 212595
+#   4. DAES: total 2130, capital = 2130 - 213095
+DEPOSITOS_PRODUCTOS = [
+    {
+        "id": "ahorro_vista", "nombre": "Ahorro a la Vista",
+        "cuenta_total": "210505", "cuenta_interes": "210595",
+        "discriminado": [
+            {"codigo": "210505001", "nombre": "Depósitos de Ahorro Voluntario"},
+            {"codigo": "210505002", "nombre": "Bolsillo Rentable"},
+        ],
+    },
+    {
+        "id": "cdat", "nombre": "CDAT",
+        "cuenta_total": "2110", "cuenta_interes": "211095",
+        "discriminado": [
+            {"codigo": "211005", "nombre": "CDAT menos de 6 meses"},
+            {"codigo": "211010", "nombre": "CDAT entre 6 y 12 meses"},
+            {"codigo": "211020", "nombre": "CDAT 18 meses o más"},
+        ],
+    },
+    {
+        "id": "contractual", "nombre": "Ahorro Contractual",
+        "cuenta_total": "2125", "cuenta_interes": "212595",
+        "discriminado": [
+            {"codigo": "212505", "nombre": "Corto Plazo"},
+            {"codigo": "212515", "nombre": "Largo Plazo"},
+        ],
+    },
+    {
+        "id": "daes", "nombre": "DAES",
+        "cuenta_total": "2130", "cuenta_interes": "213095",
+        "discriminado": [],
+    },
+]
+
+
+def calcular_crecimiento_depositos(df: pd.DataFrame, anio: int, mes: str) -> dict:
+    """
+    Calcula saldos (total y capital) y crecimiento interanual de los productos de
+    captación (depósitos). Crecimiento = (actual / mismo mes año anterior) - 1.
+    """
+    anio_anterior = anio - 1
+
+    def saldo_cuenta(periodo_anio, periodo_mes, cuenta):
+        df_p = df[(df["AÑO"] == periodo_anio) & (df["MES"] == periodo_mes.upper())]
+        return df_p[df_p["CUENTA"] == cuenta]["NUEVO SALDO"].abs().sum() / 1_000_000
+
+    productos = []
+    total_general_total = 0.0
+    total_general_capital = 0.0
+    total_general_total_aa = 0.0
+    total_general_capital_aa = 0.0
+
+    for prod in DEPOSITOS_PRODUCTOS:
+        total_act = saldo_cuenta(anio, mes, prod["cuenta_total"])
+        interes_act = saldo_cuenta(anio, mes, prod["cuenta_interes"])
+        capital_act = total_act - interes_act
+
+        total_aa = saldo_cuenta(anio_anterior, mes, prod["cuenta_total"])
+        interes_aa = saldo_cuenta(anio_anterior, mes, prod["cuenta_interes"])
+        capital_aa = total_aa - interes_aa
+
+        # Discriminado
+        disc = []
+        for d in prod["discriminado"]:
+            s = saldo_cuenta(anio, mes, d["codigo"])
+            disc.append({"codigo": d["codigo"], "nombre": d["nombre"], "saldo": s})
+
+        crec_total = ((total_act / total_aa) - 1) if total_aa > 0 else None
+        crec_capital = ((capital_act / capital_aa) - 1) if capital_aa > 0 else None
+
+        productos.append({
+            "id": prod["id"], "nombre": prod["nombre"],
+            "cuenta_total": prod["cuenta_total"], "cuenta_interes": prod["cuenta_interes"],
+            "saldo_total": total_act, "saldo_capital": capital_act, "interes": interes_act,
+            "saldo_total_aa": total_aa, "saldo_capital_aa": capital_aa,
+            "crecimiento_total": crec_total, "crecimiento_capital": crec_capital,
+            "discriminado": disc,
+        })
+        total_general_total += total_act
+        total_general_capital += capital_act
+        total_general_total_aa += total_aa
+        total_general_capital_aa += capital_aa
+
+    crec_gen_total = ((total_general_total / total_general_total_aa) - 1) if total_general_total_aa > 0 else None
+    crec_gen_capital = ((total_general_capital / total_general_capital_aa) - 1) if total_general_capital_aa > 0 else None
+
+    return {
+        "periodo": f"{mes.upper()} {anio}", "anio": anio, "mes": mes.upper(),
+        "productos": productos,
+        "total_depositos": total_general_total,
+        "total_capital": total_general_capital,
+        "total_depositos_aa": total_general_total_aa,
+        "total_capital_aa": total_general_capital_aa,
+        "crecimiento_total": crec_gen_total,
+        "crecimiento_capital": crec_gen_capital,
+        "tiene_anio_anterior": total_general_total_aa > 0,
+    }
+
+
 # CUENTAS DE 2 DÍGITOS para cada cuenta principal del balance
 SUBCUENTAS_BALANCE = {
     "1": ["11", "12", "13", "14", "15", "16", "17", "18", "19"],
@@ -1588,6 +1694,15 @@ def calcular_ingresos_costos_gastos(df: pd.DataFrame, anio: int, mes: str) -> di
     ingresos_41   = sumar_exacta("41")    # Ingresos por venta de bienes y servicios
     ingresos_4225 = sumar_exacta("4225")  # Recuperaciones de deterioro
     
+    # Saldos específicos para SUFICIENCIA DEL MARGEN FINANCIERO
+    # Margen Financiero Bruto = 41 - 61
+    # Suficiencia = MFB / (5105 + 5110 + 5115 + 5125 - 4225)
+    costos_61    = sumar_exacta("61")     # Costos financieros
+    gasto_5105   = sumar_exacta("5105")   # Beneficios a empleados
+    gasto_5110   = sumar_exacta("5110")   # Gastos generales
+    gasto_5115   = sumar_exacta("5115")   # Deterioro
+    gasto_5125   = sumar_exacta("5125")   # Otros gastos / amortizaciones
+    
     # Para validación: excedente calculado
     excedente_calculado = ingresos - costos - gastos_sin_excedente
     
@@ -1693,6 +1808,14 @@ def calcular_ingresos_costos_gastos(df: pd.DataFrame, anio: int, mes: str) -> di
         # Cuentas específicas para el módulo de Rentabilidad
         "ingresos_41": ingresos_41,
         "ingresos_4225": ingresos_4225,
+        # Suficiencia del Margen Financiero
+        "smf_41": ingresos_41,
+        "smf_61": costos_61,
+        "smf_5105": gasto_5105,
+        "smf_5110": gasto_5110,
+        "smf_5115": gasto_5115,
+        "smf_5125": gasto_5125,
+        "smf_4225": ingresos_4225,
     }
 
 
@@ -1746,9 +1869,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                  todos_evolucion_pasivo: list = None,
                  todos_evolucion_patrimonio: list = None,
                  todos_icg: list = None,
+                 todos_depositos: list = None,
                  catalogo_cuentas: dict = None) -> str:
     """Genera el archivo HTML del dashboard interactivo."""
     datos_json = [_resultado_a_json(r) for r in todos_resultados]
+    
+    if todos_depositos is None:
+        todos_depositos = []
+    depositos_json = todos_depositos
     
     # Datos de morosidad (si no se pasan, lista vacía)
     if todos_morosidad is None:
@@ -1859,53 +1987,101 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         <!-- LIBRERÍAS EMBEBIDAS (100% offline) -->
         ___LIBS_EMBEBIDAS___
         <style>
+            /* ===== Botón flotante volver al inicio ===== */
+            #btn-inicio-flotante {{
+                position: fixed;
+                top: 18px;
+                right: 18px;
+                z-index: 9999;
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                padding: 10px 16px 10px 13px;
+                background: rgba(255,255,255,0.92);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1.5px solid #d7ddd5;
+                border-radius: 999px;
+                color: #17A53D;
+                font-family: 'Poppins', sans-serif;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+                transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
+            }}
+            #btn-inicio-flotante svg {{
+                width: 18px;
+                height: 18px;
+                flex-shrink: 0;
+            }}
+            #btn-inicio-flotante:hover {{
+                background: #17A53D;
+                border-color: #17A53D;
+                color: #ffffff;
+                transform: translateY(-2px) scale(1.04);
+                box-shadow: 0 8px 24px rgba(21,128,61,0.35);
+            }}
+            /* Oculto cuando estás en el menú principal */
+            body.en-inicio #btn-inicio-flotante {{
+                display: none;
+            }}
+            @media (max-width: 640px) {{
+                #btn-inicio-flotante span {{ display: none; }}
+                #btn-inicio-flotante {{ padding: 11px; }}
+            }}
+            
             :root {{
-                /* ===== Paleta profesional ===== */
-                --bg-grad: linear-gradient(135deg, #f5f7f5 0%, #eef1ef 100%);
+                /* ===== Paleta monocromática (extraída de la imagen de referencia) ===== */
+                --bg-grad: linear-gradient(135deg, #f6f7f9 0%, #eef0f3 100%);
                 --card: #ffffff;
-                --card-soft: #f9faf9;
+                --card-soft: #f9fafb;
                 --text: #1c2520;
                 --text-muted: #6b7268;
                 --text-light: #a0a59c;
                 --border: #e4e6e0;
                 --border-soft: #eef0eb;
                 
-                /* Verdes (primario) */
-                --primary: #15803d;
-                --primary-dark: #166534;
-                --primary-soft: #f0fdf4;
-                --primary-mid: #86efac;
-                --success: #15803d;
-                --success-soft: #f0fdf4;
+                /* Verde (Greens · primario / Solvencia) */
+                --primary: #17A53D;
+                --primary-dark: #11782C;
+                --primary-soft: #C1E5CB;
+                --primary-mid: #77DE93;
+                --success: #17A53D;
+                --success-dark: #11782C;
+                --success-soft: #C1E5CB;
                 
-                /* Ámbar / Amarillo */
-                --warning: #ca8a04;
-                --warning-soft: #fefce8;
-                --warning-mid: #fde047;
+                /* Ámbar / Amarillo (Oranges-Yellows · advertencia) */
+                --warning: #FB8A09;
+                --warning-soft: #F8F5DC;
+                --warning-mid: #F5DE46;
                 
-                /* Naranja */
-                --accent: #ea580c;
-                --accent-soft: #fff7ed;
+                /* Naranja (Oranges · Ingresos / acento cálido) */
+                --accent: #F78502;
+                --accent-dark: #A75A00;
+                --accent-soft: #F8E9D7;
                 
-                /* Rojo (alerta) */
-                --danger: #dc2626;
-                --danger-soft: #fef2f2;
+                /* Rojo (Reds · alerta/peligro) */
+                --danger: #C91A15;
+                --danger-soft: #F3DFDF;
                 
-                /* Grises elegantes */
-                --slate: #475569;
-                --slate-soft: #f1f5f9;
+                /* Azul-violeta neutro elegante (sustituye los grises azulados) */
+                --slate: #4D61B4;
+                --slate-soft: #E6E8F1;
                 
-                /* Acentos por módulo */
-                --acc-solvencia: #15803d;
-                --acc-graficos: #475569;
-                --acc-formula: #ca8a04;
-                --acc-limites: #ea580c;
-                --acc-activos: #166534;
-                --acc-patrimonio: #475569;
+                /* Acentos por módulo (arco frío + naranja para resultados) */
+                --acc-solvencia: #17A53D;   /* Greens */
+                --acc-graficos: #4D61B4;    /* Blue Violets */
+                --acc-formula: #FB8A09;     /* Ámbar */
+                --acc-limites: #F78502;     /* Oranges */
+                --acc-activos: #36BAA8;     /* Blue Greens */
+                --acc-pasivo: #088DD5;      /* Azul (Pasivo) */
+                --acc-patrimonio: #6039A3;  /* Violets */
+                --acc-ingresos: #17A53D;    /* Greens */
                 
                 --shadow: 0 4px 14px rgba(15,30,20,0.05);
                 --shadow-lg: 0 12px 32px rgba(15,30,20,0.08);
-                --neon-glow: 0 0 0 1px rgba(21,128,61,0.08), 0 8px 24px rgba(21,128,61,0.10);
+                --neon-glow: 0 0 0 1px rgba(77,97,180,0.10), 0 8px 24px rgba(77,97,180,0.12);
             }}
             *, *::before, *::after {{ box-sizing: border-box; }}
             html, body {{
@@ -2154,7 +2330,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: absolute;
                 top: 0; left: 0; right: 0;
                 height: 4px;
-                background: linear-gradient(90deg, #dc2626 0%, #eab308 25%, #22c55e 42%, #15803d 100%);
+                background: linear-gradient(90deg, #C91A15 0%, #FBDA03 25%, #26D354 42%, #17A53D 100%);
             }}
             .gauge-card .gauge-label {{
                 font-size: 11px; font-weight: 600;
@@ -2190,10 +2366,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 stroke-width: 18;
                 stroke-linecap: butt;
             }}
-            .gauge-zone-red {{ stroke: #dc2626; }}
-            .gauge-zone-yellow {{ stroke: #eab308; }}
-            .gauge-zone-green {{ stroke: #22c55e; }}
-            .gauge-zone-green-dark {{ stroke: #15803d; }}
+            .gauge-zone-red {{ stroke: #C91A15; }}
+            .gauge-zone-yellow {{ stroke: #FBDA03; }}
+            .gauge-zone-green {{ stroke: #26D354; }}
+            .gauge-zone-green-dark {{ stroke: #17A53D; }}
             
             .gauge-needle-line {{
                 fill: #1c2520;
@@ -2232,10 +2408,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 letter-spacing: -1.5px;
                 transition: fill 0.5s;
             }}
-            .gauge-center-value.zona-rojo {{ fill: #dc2626; }}
-            .gauge-center-value.zona-amarillo {{ fill: #eab308; }}
-            .gauge-center-value.zona-verde {{ fill: #22c55e; }}
-            .gauge-center-value.zona-verde-dark {{ fill: #15803d; }}
+            .gauge-center-value.zona-rojo {{ fill: #C91A15; }}
+            .gauge-center-value.zona-amarillo {{ fill: #E2C403; }}
+            .gauge-center-value.zona-verde {{ fill: #26D354; }}
+            .gauge-center-value.zona-verde-dark {{ fill: #17A53D; }}
             
             .gauge-status {{
                 margin-top: 12px;
@@ -2789,7 +2965,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 display: inline-block;
                 width: 6px;
                 height: 36px;
-                background: linear-gradient(180deg, #15803d 0%, #22c55e 100%);
+                background: linear-gradient(180deg, #17A53D 0%, #26D354 100%);
                 border-radius: 3px;
                 margin-right: 16px;
                 vertical-align: -6px;
@@ -2852,59 +3028,59 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Colores por módulo (variables CSS) */
             .modulo-activo {{
-                --card-color: #06b6d4;
-                --card-color-soft: rgba(6,182,212,0.10);
-                --card-color-glow: rgba(6,182,212,0.25);
-                --card-color-deep: #0e7490;
-                border-color: #06b6d4;
-                box-shadow: 0 0 0 4px rgba(6,182,212,0.10), 0 6px 22px rgba(6,182,212,0.22);
+                --card-color: #36BAA8;
+                --card-color-soft: rgba(54,186,168,0.10);
+                --card-color-glow: rgba(54,186,168,0.25);
+                --card-color-deep: #237C70;
+                border-color: #36BAA8;
+                box-shadow: 0 0 0 4px rgba(54,186,168,0.10), 0 6px 22px rgba(54,186,168,0.22);
             }}
             .modulo-activo:hover {{
-                box-shadow: 0 0 0 6px rgba(6,182,212,0.16), 0 12px 32px rgba(6,182,212,0.40);
+                box-shadow: 0 0 0 6px rgba(54,186,168,0.16), 0 12px 32px rgba(54,186,168,0.40);
             }}
             
             .modulo-pasivo {{
-                --card-color: #ec4899;
-                --card-color-soft: rgba(236,72,153,0.10);
-                --card-color-glow: rgba(236,72,153,0.25);
-                --card-color-deep: #9d174d;
-                border-color: #ec4899;
-                box-shadow: 0 0 0 4px rgba(236,72,153,0.10), 0 6px 22px rgba(236,72,153,0.22);
+                --card-color: #088DD5;
+                --card-color-soft: rgba(8,141,213,0.10);
+                --card-color-glow: rgba(8,141,213,0.25);
+                --card-color-deep: #045988;
+                border-color: #088DD5;
+                box-shadow: 0 0 0 4px rgba(8,141,213,0.10), 0 6px 22px rgba(8,141,213,0.22);
             }}
             .modulo-pasivo:hover {{
-                box-shadow: 0 0 0 6px rgba(236,72,153,0.16), 0 12px 32px rgba(236,72,153,0.40);
+                box-shadow: 0 0 0 6px rgba(8,141,213,0.16), 0 12px 32px rgba(8,141,213,0.40);
             }}
             
             .modulo-patrimonio {{
-                --card-color: #8b5cf6;
-                --card-color-soft: rgba(139,92,246,0.10);
-                --card-color-glow: rgba(139,92,246,0.25);
-                --card-color-deep: #5b21b6;
-                border-color: #8b5cf6;
-                box-shadow: 0 0 0 4px rgba(139,92,246,0.10), 0 6px 22px rgba(139,92,246,0.22);
+                --card-color: #6039A3;
+                --card-color-soft: rgba(96,57,163,0.10);
+                --card-color-glow: rgba(96,57,163,0.25);
+                --card-color-deep: #3C2367;
+                border-color: #6039A3;
+                box-shadow: 0 0 0 4px rgba(96,57,163,0.10), 0 6px 22px rgba(96,57,163,0.22);
             }}
             .modulo-patrimonio:hover {{
-                box-shadow: 0 0 0 6px rgba(139,92,246,0.16), 0 12px 32px rgba(139,92,246,0.40);
+                box-shadow: 0 0 0 6px rgba(96,57,163,0.16), 0 12px 32px rgba(96,57,163,0.40);
             }}
             
             .modulo-ingresos {{
-                --card-color: #f59e0b;
-                --card-color-soft: rgba(245,158,11,0.10);
-                --card-color-glow: rgba(245,158,11,0.25);
-                --card-color-deep: #b45309;
-                border-color: #f59e0b;
-                box-shadow: 0 0 0 4px rgba(245,158,11,0.10), 0 6px 22px rgba(245,158,11,0.22);
+                --card-color: #17A53D;
+                --card-color-soft: rgba(23,165,61,0.10);
+                --card-color-glow: rgba(23,165,61,0.25);
+                --card-color-deep: #11782C;
+                border-color: #17A53D;
+                box-shadow: 0 0 0 4px rgba(23,165,61,0.10), 0 6px 22px rgba(23,165,61,0.22);
             }}
             .modulo-ingresos:hover {{
-                box-shadow: 0 0 0 6px rgba(245,158,11,0.16), 0 12px 32px rgba(245,158,11,0.40);
+                box-shadow: 0 0 0 6px rgba(23,165,61,0.16), 0 12px 32px rgba(23,165,61,0.40);
             }}
             
             .modulo-solvencia {{
-                --card-color: #15803d;
+                --card-color: #17A53D;
                 --card-color-soft: rgba(21,128,61,0.10);
                 --card-color-glow: rgba(21,128,61,0.30);
-                --card-color-deep: #14532d;
-                border-color: #15803d;
+                --card-color-deep: #0C5E22;
+                border-color: #17A53D;
                 box-shadow: 0 0 0 4px rgba(21,128,61,0.12), 0 6px 22px rgba(21,128,61,0.25);
             }}
             .modulo-solvencia:hover {{
@@ -2913,11 +3089,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === RIESGO: card del submenu Activo === */
             .modulo-riesgo {{
-                --card-color: #1e40af;
+                --card-color: #045988;
                 --card-color-soft: rgba(30,64,175,0.10);
                 --card-color-glow: rgba(30,64,175,0.30);
-                --card-color-deep: #1e3a8a;
-                border-color: #1e40af;
+                --card-color-deep: #033F61;
+                border-color: #045988;
                 box-shadow: 0 0 0 4px rgba(30,64,175,0.12), 0 6px 22px rgba(30,64,175,0.25);
             }}
             .modulo-riesgo:hover {{
@@ -2926,11 +3102,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === COBERTURA: card del submenu Activo (teal/esmeralda) === */
             .modulo-cobertura {{
-                --card-color: #0d9488;
+                --card-color: #2A9488;
                 --card-color-soft: rgba(13,148,136,0.10);
                 --card-color-glow: rgba(13,148,136,0.30);
-                --card-color-deep: #115e59;
-                border-color: #0d9488;
+                --card-color-deep: #1E6B61;
+                border-color: #2A9488;
                 box-shadow: 0 0 0 4px rgba(13,148,136,0.12), 0 6px 22px rgba(13,148,136,0.25);
             }}
             .modulo-cobertura:hover {{
@@ -2939,11 +3115,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === CRECIMIENTO: card del submenu Activo (índigo) === */
             .modulo-crecimiento {{
-                --card-color: #6366f1;
+                --card-color: #088DD5;
                 --card-color-soft: rgba(99,102,241,0.10);
                 --card-color-glow: rgba(99,102,241,0.30);
-                --card-color-deep: #4338ca;
-                border-color: #6366f1;
+                --card-color-deep: #045988;
+                border-color: #088DD5;
                 box-shadow: 0 0 0 4px rgba(99,102,241,0.12), 0 6px 22px rgba(99,102,241,0.25);
             }}
             .modulo-crecimiento:hover {{
@@ -2952,11 +3128,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === MORA: card del submenu Activo === */
             .modulo-mora {{
-                --card-color: #dc2626;
+                --card-color: #C91A15;
                 --card-color-soft: rgba(220,38,38,0.10);
                 --card-color-glow: rgba(220,38,38,0.30);
-                --card-color-deep: #991b1b;
-                border-color: #dc2626;
+                --card-color-deep: #A0100B;
+                border-color: #C91A15;
                 box-shadow: 0 0 0 4px rgba(220,38,38,0.12), 0 6px 22px rgba(220,38,38,0.25);
             }}
             .modulo-mora:hover {{
@@ -2965,11 +3141,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === EVOLUCIÓN ACTIVO: cyan === */
             .modulo-evolucion-activo {{
-                --card-color: #06b6d4;
+                --card-color: #36BAA8;
                 --card-color-soft: rgba(6,182,212,0.10);
                 --card-color-glow: rgba(6,182,212,0.30);
-                --card-color-deep: #0e7490;
-                border-color: #06b6d4;
+                --card-color-deep: #237C70;
+                border-color: #36BAA8;
                 box-shadow: 0 0 0 4px rgba(6,182,212,0.12), 0 6px 22px rgba(6,182,212,0.25);
             }}
             .modulo-evolucion-activo:hover {{
@@ -2978,44 +3154,44 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === EVOLUCIÓN ICG: naranja === */
             .modulo-evolucion-icg {{
-                --card-color: #f97316;
-                --card-color-soft: rgba(249,115,22,0.10);
-                --card-color-glow: rgba(249,115,22,0.30);
-                --card-color-deep: #c2410c;
-                border-color: #f97316;
-                box-shadow: 0 0 0 4px rgba(249,115,22,0.12), 0 6px 22px rgba(249,115,22,0.25);
+                --card-color: #17A53D;
+                --card-color-soft: rgba(23,165,61,0.10);
+                --card-color-glow: rgba(23,165,61,0.30);
+                --card-color-deep: #11782C;
+                border-color: #17A53D;
+                box-shadow: 0 0 0 4px rgba(23,165,61,0.12), 0 6px 22px rgba(23,165,61,0.25);
             }}
             .modulo-evolucion-icg:hover {{
-                box-shadow: 0 0 0 6px rgba(249,115,22,0.20), 0 14px 36px rgba(249,115,22,0.45);
+                box-shadow: 0 0 0 6px rgba(23,165,61,0.20), 0 14px 36px rgba(23,165,61,0.45);
             }}
             .btn-volver-icg {{
-                color: #c2410c;
-                border-color: #f97316;
-                background: rgba(249,115,22,0.05);
+                color: #11782C;
+                border-color: #17A53D;
+                background: rgba(23,165,61,0.05);
             }}
             .btn-volver-icg:hover {{
-                background: rgba(249,115,22,0.12);
+                background: rgba(23,165,61,0.12);
             }}
             
-            /* === RENTABILIDAD: dorado (rentabilidad/profit) === */
+            /* === RENTABILIDAD: verde oscuro (gama Ingresos) === */
             .modulo-rentabilidad {{
-                --card-color: #634782;
-                --card-color-soft: rgba(99,71,130,0.10);
-                --card-color-glow: rgba(99,71,130,0.30);
-                --card-color-deep: #3D2259;
-                border-color: #634782;
-                box-shadow: 0 0 0 4px rgba(184,146,60,0.12), 0 6px 22px rgba(184,146,60,0.25);
+                --card-color: #11782C;
+                --card-color-soft: rgba(17,120,44,0.10);
+                --card-color-glow: rgba(17,120,44,0.30);
+                --card-color-deep: #0C5E22;
+                border-color: #11782C;
+                box-shadow: 0 0 0 4px rgba(17,120,44,0.12), 0 6px 22px rgba(17,120,44,0.25);
             }}
             .modulo-rentabilidad:hover {{
-                box-shadow: 0 0 0 6px rgba(99,71,130,0.20), 0 14px 36px rgba(99,71,130,0.45);
+                box-shadow: 0 0 0 6px rgba(17,120,44,0.20), 0 14px 36px rgba(17,120,44,0.45);
             }}
             .btn-volver-rent {{
-                color: #3D2259;
-                border-color: #634782;
-                background: rgba(99,71,130,0.05);
+                color: #0C5E22;
+                border-color: #11782C;
+                background: rgba(17,120,44,0.05);
             }}
             .btn-volver-rent:hover {{
-                background: rgba(99,71,130,0.12);
+                background: rgba(17,120,44,0.12);
             }}
             
             /* === KPIs del módulo Rentabilidad === */
@@ -3028,12 +3204,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             @media (max-width: 900px) {{
                 .rent-kpis-grid {{ grid-template-columns: 1fr; }}
             }}
-            .evo-kpi-rent-roe        {{ border-left: 4px solid #634782; }}
-            .evo-kpi-rent-roe .evo-kpi-valor   {{ color: #3D2259; }}
-            .evo-kpi-rent-margen     {{ border-left: 4px solid #937BAB; }}
-            .evo-kpi-rent-margen .evo-kpi-valor {{ color: #634782; }}
+            .evo-kpi-rent-roe        {{ border-left: 4px solid #6039A3; }}
+            .evo-kpi-rent-roe .evo-kpi-valor   {{ color: #3C2367; }}
+            .evo-kpi-rent-margen     {{ border-left: 4px solid #9B86C0; }}
+            .evo-kpi-rent-margen .evo-kpi-valor {{ color: #6039A3; }}
             .evo-kpi-rent-roic       {{ border-left: 4px solid #DEBBFF; }}
-            .evo-kpi-rent-roic .evo-kpi-valor   {{ color: #937BAB; }}
+            .evo-kpi-rent-roic .evo-kpi-valor   {{ color: #9B86C0; }}
             
             /* Bloques de indicador (gráfica + tabla apiladas) */
             .rent-indicador-bloque .historico-flex-wrap {{ margin-bottom: 6px; }}
@@ -3058,9 +3234,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .rent-leyenda-line {{
                 width: 22px; height: 3px; display: inline-block; border-radius: 2px;
             }}
-            .rent-line-roe    {{ background: #b8923c; }}
-            .rent-line-margen {{ background: #3F7878; }}
-            .rent-line-roic   {{ background: #5A8B6E; }}
+            .rent-line-roe    {{ background: #11782C; }}
+            .rent-line-margen {{ background: #A75A00; }}
+            .rent-line-roic   {{ background: #C91A15; }}
             
             /* Leyenda en escala de grises (gráfico de barras) */
             .rent-leyenda-grises {{ justify-content: center; margin-top: 16px; }}
@@ -3146,14 +3322,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             @media (max-width: 600px) {{
                 .icg-kpis-grid {{ grid-template-columns: 1fr; }}
             }}
-            .evo-kpi-icg-ingresos                       {{ border-left: 4px solid #15803d; }}
-            .evo-kpi-icg-ingresos .evo-kpi-valor        {{ color: #166534; }}
-            .evo-kpi-icg-costos                         {{ border-left: 4px solid #c2410c; }}
-            .evo-kpi-icg-costos .evo-kpi-valor          {{ color: #c2410c; }}
-            .evo-kpi-icg-gastos                         {{ border-left: 4px solid #dc2626; }}
-            .evo-kpi-icg-gastos .evo-kpi-valor          {{ color: #991b1b; }}
-            .evo-kpi-icg-excedente                      {{ border-left: 4px solid #6d28d9; }}
-            .evo-kpi-icg-excedente .evo-kpi-valor       {{ color: #6d28d9; }}
+            .evo-kpi-icg-ingresos                       {{ border-left: 4px solid #17A53D; }}
+            .evo-kpi-icg-ingresos .evo-kpi-valor        {{ color: #11782C; }}
+            .evo-kpi-icg-costos                         {{ border-left: 4px solid #17A53D; }}
+            .evo-kpi-icg-costos .evo-kpi-valor          {{ color: #17A53D; }}
+            .evo-kpi-icg-gastos                         {{ border-left: 4px solid #11782C; }}
+            .evo-kpi-icg-gastos .evo-kpi-valor          {{ color: #11782C; }}
+            .evo-kpi-icg-excedente                      {{ border-left: 4px solid #0C5E22; }}
+            .evo-kpi-icg-excedente .evo-kpi-valor       {{ color: #0C5E22; }}
             
             /* === Leyenda del gráfico combinado === */
             .icg-leyenda {{
@@ -3186,16 +3362,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 display: inline-block;
                 border-radius: 2px;
             }}
-            /* Paleta pastel — muestras planas para la leyenda */
-            .icg-sq-ingresos {{ background: #F5D77E; border: 1px solid #E5C166; }}
-            .icg-sq-costos   {{ background: #6FA8A8; border: 1px solid #578F8F; }}
-            .icg-sq-gastos   {{ background: #A8D5BA; border: 1px solid #8AC0A2; }}
-            .icg-sq-excedente-pos {{ background: #2C3E50; border: 1px solid #1c2520; }}
-            .icg-sq-excedente-neg {{ background: #C0392B; border: 1px solid #962618; }}
+            /* Muestras de leyenda — armonizadas con ICG_COLORS de la paleta */
+            .icg-sq-ingresos {{ background: #77DE93; border: 1px solid #26D354; }}
+            .icg-sq-costos   {{ background: #5FBF7E; border: 1px solid #17A53D; }}
+            .icg-sq-gastos   {{ background: #3E9A5C; border: 1px solid #11782C; }}
+            .icg-sq-excedente-pos {{ background: #0C5E22; border: 1px solid #11782C; }}
+            .icg-sq-excedente-neg {{ background: #C91A15; border: 1px solid #A0100B; }}
             /* Excedente: la "línea" se acompaña de un punto blanco con borde negro,
                igual que los marcadores del gráfico */
             .icg-line-excedente {{
-                background: #1a1a1a;
+                background: #0C5E22;
                 height: 2px; width: 24px;
                 position: relative;
             }}
@@ -3206,7 +3382,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 transform: translate(-50%, -50%);
                 width: 7px; height: 7px;
                 background: #ffffff;
-                border: 1.5px solid #1a1a1a;
+                border: 1.5px solid #4D61B4;
                 border-radius: 50%;
             }}
             
@@ -3224,7 +3400,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 border-radius: 16px;
                 box-shadow: inset 0 0 0 1px rgba(120,140,140,0.10);
             }}
-            .chart-scroll-icg::-webkit-scrollbar-thumb {{ background: #A8D5BA; }}
+            .chart-scroll-icg::-webkit-scrollbar-thumb {{ background: #17A53D; }}
             
             /* === Composición por subcuentas en 3 columnas === */
             .icg-subcuentas-cols {{
@@ -3385,24 +3561,24 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === EVOLUCIÓN PASIVO: ámbar/naranja === */
             .modulo-evolucion-pasivo {{
-                --card-color: #f59e0b;
-                --card-color-soft: rgba(245,158,11,0.10);
-                --card-color-glow: rgba(245,158,11,0.30);
-                --card-color-deep: #b45309;
-                border-color: #f59e0b;
-                box-shadow: 0 0 0 4px rgba(245,158,11,0.12), 0 6px 22px rgba(245,158,11,0.25);
+                --card-color: #088DD5;
+                --card-color-soft: rgba(8,141,213,0.10);
+                --card-color-glow: rgba(8,141,213,0.30);
+                --card-color-deep: #045988;
+                border-color: #088DD5;
+                box-shadow: 0 0 0 4px rgba(8,141,213,0.12), 0 6px 22px rgba(8,141,213,0.25);
             }}
             .modulo-evolucion-pasivo:hover {{
-                box-shadow: 0 0 0 6px rgba(245,158,11,0.20), 0 14px 36px rgba(245,158,11,0.45);
+                box-shadow: 0 0 0 6px rgba(8,141,213,0.20), 0 14px 36px rgba(8,141,213,0.45);
             }}
             
             /* === EVOLUCIÓN PATRIMONIO: violeta === */
             .modulo-evolucion-patrimonio {{
-                --card-color: #8b5cf6;
+                --card-color: #6039A3;
                 --card-color-soft: rgba(139,92,246,0.10);
                 --card-color-glow: rgba(139,92,246,0.30);
-                --card-color-deep: #6d28d9;
-                border-color: #8b5cf6;
+                --card-color-deep: #3C2367;
+                border-color: #6039A3;
                 box-shadow: 0 0 0 4px rgba(139,92,246,0.12), 0 6px 22px rgba(139,92,246,0.25);
             }}
             .modulo-evolucion-patrimonio:hover {{
@@ -3438,28 +3614,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 4px 14px rgba(0,0,0,0.12);
             }}
             .btn-volver-activo {{
-                color: #0e7490;
-                border-color: #06b6d4;
-                background: rgba(6,182,212,0.05);
+                color: #237C70;
+                border-color: #36BAA8;
+                background: rgba(54,186,168,0.05);
             }}
             .btn-volver-activo:hover {{
-                background: rgba(6,182,212,0.12);
+                background: rgba(54,186,168,0.12);
             }}
             .btn-volver-pasivo {{
-                color: #b45309;
-                border-color: #f59e0b;
-                background: rgba(245,158,11,0.05);
+                color: #045988;
+                border-color: #088DD5;
+                background: rgba(8,141,213,0.05);
             }}
             .btn-volver-pasivo:hover {{
-                background: rgba(245,158,11,0.12);
+                background: rgba(8,141,213,0.12);
             }}
             .btn-volver-patrimonio {{
-                color: #6d28d9;
-                border-color: #8b5cf6;
-                background: rgba(139,92,246,0.05);
+                color: #3C2367;
+                border-color: #6039A3;
+                background: rgba(96,57,163,0.05);
             }}
             .btn-volver-patrimonio:hover {{
-                background: rgba(139,92,246,0.12);
+                background: rgba(96,57,163,0.12);
             }}
             
             /* === Toggle Cobertura con/sin Provisión General === */
@@ -3498,16 +3674,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 white-space: nowrap;
             }}
             .cobertura-toggle-btn:hover {{
-                color: #115e59;
+                color: #1E6B61;
                 background: rgba(13,148,136,0.06);
             }}
             .cobertura-toggle-btn.activo {{
-                background: #0d9488;
+                background: #2A9488;
                 color: white;
                 box-shadow: 0 2px 6px rgba(13,148,136,0.30);
             }}
             .cobertura-toggle-btn.activo:hover {{
-                background: #115e59;
+                background: #1E6B61;
                 color: white;
             }}
             .cobertura-toggle-hint {{
@@ -3516,6 +3692,94 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 font-style: italic;
                 text-align: center;
             }}
+            
+            /* === Tabla de productos de depósitos === */
+            .depositos-tabla-wrap {{
+                overflow-x: auto;
+                border-radius: 12px;
+                border: 1px solid #e9edf2;
+            }}
+            .depositos-tabla {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 13px;
+                min-width: 720px;
+            }}
+            .depositos-tabla thead th {{
+                position: sticky;
+                top: 0;
+                background: #E2F0FA;
+                color: #045988;
+                font-weight: 700;
+                font-size: 11.5px;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+                padding: 13px 16px;
+                text-align: right;
+                border-bottom: 2px solid #F4CC9E;
+                z-index: 2;
+            }}
+            .depositos-tabla thead th:first-child {{
+                text-align: left;
+            }}
+            .depositos-tabla tbody td {{
+                padding: 12px 16px;
+                text-align: right;
+                border-bottom: 1px solid #f1f5f9;
+                color: #334155;
+                font-weight: 600;
+            }}
+            .depositos-tabla tbody td:first-child {{
+                text-align: left;
+                font-weight: 700;
+                color: #1e293b;
+            }}
+            .depositos-tabla tbody tr.dep-producto-row {{
+                background: #ffffff;
+                cursor: default;
+            }}
+            .depositos-tabla tbody tr.dep-producto-row:hover {{
+                background: #fffaf3;
+            }}
+            .depositos-tabla tbody tr.dep-disc-row td {{
+                font-size: 12px;
+                color: #64748b;
+                font-weight: 500;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                background: #fcfcfd;
+            }}
+            .depositos-tabla tbody tr.dep-disc-row td:first-child {{
+                padding-left: 38px;
+                font-weight: 500;
+                color: #64748b;
+            }}
+            .depositos-tabla tbody tr.dep-total-row td {{
+                background: #E2F0FA;
+                font-weight: 800;
+                color: #045988;
+                border-top: 2px solid #C1E1F2;
+                font-size: 13.5px;
+            }}
+            .dep-prod-nombre {{
+                display: inline-flex;
+                align-items: center;
+                gap: 9px;
+            }}
+            .dep-prod-punto {{
+                width: 10px; height: 10px; border-radius: 50%;
+                flex-shrink: 0;
+            }}
+            .dep-crec {{
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                font-size: 12px;
+                font-weight: 700;
+            }}
+            .dep-crec.sube {{ color: #16a34a; }}
+            .dep-crec.baja {{ color: #C91A15; }}
+            .dep-crec.igual {{ color: #94a3b8; }}
             
             /* === KPIs cards de Evolución === */
             .evolucion-kpis-grid {{
@@ -3562,15 +3826,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 color: #6b7280;
                 font-style: italic;
             }}
-            .evo-kpi-activo .evo-kpi-valor       {{ color: #0e7490; }}
-            .evo-kpi-activo                       {{ border-left: 4px solid #06b6d4; }}
-            .evo-kpi-pasivo .evo-kpi-valor       {{ color: #b45309; }}
-            .evo-kpi-pasivo                       {{ border-left: 4px solid #f59e0b; }}
-            .evo-kpi-patrimonio .evo-kpi-valor   {{ color: #6d28d9; }}
-            .evo-kpi-patrimonio                   {{ border-left: 4px solid #8b5cf6; }}
+            .evo-kpi-activo .evo-kpi-valor       {{ color: #237C70; }}
+            .evo-kpi-activo                       {{ border-left: 4px solid #36BAA8; }}
+            .evo-kpi-pasivo .evo-kpi-valor       {{ color: #088DD5; }}
+            .evo-kpi-pasivo                       {{ border-left: 4px solid #088DD5; }}
+            .evo-kpi-patrimonio .evo-kpi-valor   {{ color: #3C2367; }}
+            .evo-kpi-patrimonio                   {{ border-left: 4px solid #6039A3; }}
             
-            .evo-kpi-var-positiva  {{ color: #15803d !important; }}
-            .evo-kpi-var-negativa  {{ color: #dc2626 !important; }}
+            .evo-kpi-var-positiva  {{ color: #17A53D !important; }}
+            .evo-kpi-var-negativa  {{ color: #C91A15 !important; }}
             .evo-kpi-var-neutral   {{ color: #6b7280 !important; }}
             
             /* === Composición por subcuentas === */
@@ -3705,17 +3969,17 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             /* === Scrollbar coloreada del scroll === */
-            .chart-scroll-evolucion-activo::-webkit-scrollbar-thumb {{ background: #06b6d4; }}
-            .chart-scroll-evolucion-pasivo::-webkit-scrollbar-thumb {{ background: #f59e0b; }}
-            .chart-scroll-evolucion-patrimonio::-webkit-scrollbar-thumb {{ background: #8b5cf6; }}
+            .chart-scroll-evolucion-activo::-webkit-scrollbar-thumb {{ background: #36BAA8; }}
+            .chart-scroll-evolucion-pasivo::-webkit-scrollbar-thumb {{ background: #088DD5; }}
+            .chart-scroll-evolucion-patrimonio::-webkit-scrollbar-thumb {{ background: #6039A3; }}
             
             /* === Activo composición === */
             .modulo-activo-comp {{
-                --card-color: #06b6d4;
+                --card-color: #36BAA8;
                 --card-color-soft: rgba(6,182,212,0.10);
                 --card-color-glow: rgba(6,182,212,0.25);
-                --card-color-deep: #0e7490;
-                border-color: #06b6d4;
+                --card-color-deep: #237C70;
+                border-color: #36BAA8;
                 box-shadow: 0 0 0 4px rgba(6,182,212,0.10), 0 6px 22px rgba(6,182,212,0.22);
             }}
             .modulo-activo-comp:hover {{
@@ -3724,11 +3988,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === Cartera === */
             .modulo-cartera {{
-                --card-color: #0ea5e9;
+                --card-color: #088DD5;
                 --card-color-soft: rgba(14,165,233,0.10);
                 --card-color-glow: rgba(14,165,233,0.25);
                 --card-color-deep: #075985;
-                border-color: #0ea5e9;
+                border-color: #088DD5;
                 box-shadow: 0 0 0 4px rgba(14,165,233,0.10), 0 6px 22px rgba(14,165,233,0.22);
             }}
             .modulo-cartera:hover {{
@@ -3840,12 +4104,113 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 text-align: center;
                 margin-bottom: 22px;
             }}
+            /* ===== Panel de generación de informe PDF ===== */
+            .informe-panel {{
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 18px;
+                background: linear-gradient(135deg, #EEF2F6 0%, #E8EDF3 100%);
+                border: 1px solid #E6E8F1;
+                border-radius: 14px;
+                padding: 16px 20px;
+                margin-bottom: 24px;
+            }}
+            .informe-panel-info {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }}
+            .informe-panel-ico {{
+                font-size: 26px;
+                line-height: 1;
+                flex: 0 0 auto;
+            }}
+            .informe-panel-titulo {{
+                font-size: 15px;
+                font-weight: 700;
+                color: #1c2520;
+            }}
+            .informe-panel-sub {{
+                font-size: 12.5px;
+                color: #6b7268;
+                margin-top: 2px;
+                max-width: 420px;
+            }}
+            .informe-panel-controles {{
+                display: flex;
+                align-items: flex-end;
+                gap: 12px;
+                flex-wrap: wrap;
+            }}
+            .informe-campo {{
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }}
+            .informe-campo label {{
+                font-size: 10.5px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #6b7268;
+                padding-left: 2px;
+            }}
+            .informe-campo select {{
+                font-family: 'Poppins', sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                color: #1c2520;
+                padding: 8px 12px;
+                border: 1.5px solid #d4d9e3;
+                border-radius: 9px;
+                background: #ffffff;
+                cursor: pointer;
+                min-width: 130px;
+            }}
+            .informe-campo select:focus {{
+                outline: none;
+                border-color: #4D61B4;
+            }}
+            .btn-informe {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: linear-gradient(135deg, #4D61B4 0%, #33417C 100%);
+                color: #ffffff;
+                border: none;
+                border-radius: 9px;
+                padding: 10px 20px;
+                font-family: 'Poppins', sans-serif;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 14px rgba(77,97,180,0.30);
+                height: 40px;
+            }}
+            .btn-informe:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 6px 20px rgba(77,97,180,0.42);
+            }}
+            .btn-informe:disabled {{
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }}
+            @media (max-width: 680px) {{
+                .informe-panel {{ flex-direction: column; align-items: stretch; }}
+                .informe-panel-controles {{ justify-content: stretch; }}
+                .informe-campo {{ flex: 1; }}
+                .informe-campo select {{ width: 100%; }}
+            }}
             .tablero-titulo {{
                 font-size: 26px;
                 font-weight: 800;
                 letter-spacing: -0.5px;
                 margin: 0 0 6px;
-                background: linear-gradient(135deg, #0e7490 0%, #6d28d9 50%, #b45309 100%);
+                background: linear-gradient(135deg, #36BAA8 0%, #4D61B4 50%, #6039A3 100%);
                 -webkit-background-clip: text;
                 background-clip: text;
                 -webkit-text-fill-color: transparent;
@@ -3857,7 +4222,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             .tablero-sub span {{
                 font-weight: 700;
-                color: #0e7490;
+                color: #4D61B4;
             }}
             
             /* Tarjeta contenedora de cada matriz — glassmorphism */
@@ -3881,10 +4246,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 opacity: 0.9;
             }}
             .matriz-pct::before {{
-                background: linear-gradient(90deg, #0e7490, #06b6d4, #6d28d9);
+                background: linear-gradient(90deg, #36BAA8, #4D61B4, #6039A3);
             }}
             .matriz-money::before {{
-                background: linear-gradient(90deg, #b45309, #f59e0b, #15803d);
+                background: linear-gradient(90deg, #4D61B4, #6039A3, #F78502);
             }}
             
             .matriz-card-head {{
@@ -3906,12 +4271,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 flex-shrink: 0;
             }}
             .matriz-pct .matriz-card-ico {{
-                background: linear-gradient(135deg, #0e7490, #6d28d9);
-                box-shadow: 0 6px 18px rgba(13,116,144,0.4);
+                background: linear-gradient(135deg, #36BAA8, #6039A3);
+                box-shadow: 0 6px 18px rgba(54,186,168,0.4);
             }}
             .matriz-money .matriz-card-ico {{
-                background: linear-gradient(135deg, #b45309, #15803d);
-                box-shadow: 0 6px 18px rgba(180,83,9,0.4);
+                background: linear-gradient(135deg, #4D61B4, #F78502);
+                box-shadow: 0 6px 18px rgba(77,97,180,0.4);
             }}
             .matriz-card-head h3 {{
                 font-size: 17px;
@@ -3945,13 +4310,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 border: 1px solid #e2e8f0;
             }}
             .matriz-pct .matriz-scroll::-webkit-scrollbar-thumb {{
-                background: linear-gradient(90deg, #0e7490, #6d28d9);
+                background: linear-gradient(90deg, #237C70, #3C2367);
                 border-radius: 999px;
                 border: 3px solid #eef2f6;
                 min-width: 60px;
             }}
             .matriz-money .matriz-scroll::-webkit-scrollbar-thumb {{
-                background: linear-gradient(90deg, #b45309, #15803d);
+                background: linear-gradient(90deg, #A75A00, #17A53D);
                 border-radius: 999px;
                 border: 3px solid #eef2f6;
                 min-width: 60px;
@@ -3996,15 +4361,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             /* Resaltar columna del año (diciembre) — dorado sutil */
             .matriz-tabla thead th.cierre-anual {{
-                background: #fffbeb;
-                color: #b45309;
+                background: #F8F5DC;
+                color: #A75A00;
                 font-weight: 700;
-                border-color: #fde68a;
+                border-color: #F5DE46;
             }}
             /* Resaltar el último período cargado */
             .matriz-tabla thead th.ultimo-periodo {{
-                background: #ecfeff;
-                color: #0e7490;
+                background: #D8EEEB;
+                color: #237C70;
                 font-weight: 700;
                 border-color: #a5f3fc;
             }}
@@ -4095,7 +4460,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 letter-spacing: 0.1px;
             }}
             .var-sube  {{ color: #16a34a; }}
-            .var-baja  {{ color: #dc2626; }}
+            .var-baja  {{ color: #C91A15; }}
             .var-igual {{ color: #94a3b8; }}
             
             /* Filas clickables */
@@ -4154,7 +4519,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 24px 60px rgba(0,0,0,0.25);
                 animation: cardEntrada 0.4s ease;
                 position: relative;
-                border: 1.5px solid var(--prox-color, #06b6d4);
+                border: 1.5px solid var(--prox-color, #36BAA8);
                 box-shadow: 0 0 0 4px var(--prox-soft, rgba(6,182,212,0.12)),
                             0 24px 60px rgba(0,0,0,0.25);
             }}
@@ -4172,7 +4537,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .proximamente-icono svg {{
                 width: 36px;
                 height: 36px;
-                stroke: var(--prox-color, #06b6d4);
+                stroke: var(--prox-color, #36BAA8);
                 stroke-width: 2;
                 fill: none;
             }}
@@ -4180,7 +4545,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .proximamente-card h2 {{
                 font-size: 24px;
                 margin: 0 0 10px;
-                color: var(--prox-deep, #0e7490);
+                color: var(--prox-deep, #237C70);
                 font-weight: 700;
                 letter-spacing: -0.4px;
             }}
@@ -4194,7 +4559,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .proximamente-tag {{
                 display: inline-block;
                 background: var(--prox-soft, rgba(6,182,212,0.12));
-                color: var(--prox-deep, #0e7490);
+                color: var(--prox-deep, #237C70);
                 padding: 6px 14px;
                 border-radius: 999px;
                 font-size: 11.5px;
@@ -4223,9 +4588,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Botón "Volver al menú" — Estilo NEON MORADO llamativo */
             .btn-menu {{
-                background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+                background: linear-gradient(135deg, #26D354 0%, #17A53D 100%);
                 color: #ffffff;
-                border: 1.5px solid #4ade80;
+                border: 1.5px solid #77DE93;
                 padding: 10px 20px;
                 border-radius: 13px;
                 font-family: 'Poppins', sans-serif;
@@ -4276,7 +4641,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             .btn-menu:hover {{
                 transform: translateX(-3px) translateY(-1px);
-                background: linear-gradient(135deg, #4ade80 0%, #16a34a 100%);
+                background: linear-gradient(135deg, #77DE93 0%, #16a34a 100%);
                 box-shadow:
                     0 0 0 4px rgba(74, 222, 128, 0.25),
                     0 0 32px rgba(74, 222, 128, 0.75),
@@ -4316,19 +4681,19 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* ===== DASHBOARD DE MORA - efectos neón rojo ===== */
             .gauge-card-mora::before {{
-                background: linear-gradient(90deg, #15803d 0%, #eab308 40%, #f97316 70%, #dc2626 100%);
+                background: linear-gradient(90deg, #17A53D 0%, #E2C403 40%, #F78502 70%, #C91A15 100%);
             }}
-            .gauge-zone-orange-mora {{ stroke: #f97316; }}
-            .gauge-zone-red-mora {{ stroke: #dc2626; }}
-            .gauge-center-value.zona-mora-bajo {{ fill: #15803d; }}
-            .gauge-center-value.zona-mora-medio {{ fill: #eab308; }}
-            .gauge-center-value.zona-mora-alto {{ fill: #f97316; }}
-            .gauge-center-value.zona-mora-critico {{ fill: #dc2626; }}
+            .gauge-zone-orange-mora {{ stroke: #F78502; }}
+            .gauge-zone-red-mora {{ stroke: #C91A15; }}
+            .gauge-center-value.zona-mora-bajo {{ fill: #17A53D; }}
+            .gauge-center-value.zona-mora-medio {{ fill: #E2C403; }}
+            .gauge-center-value.zona-mora-alto {{ fill: #F78502; }}
+            .gauge-center-value.zona-mora-critico {{ fill: #C91A15; }}
             
             /* KPIs específicos de Mora */
-            .kpi-card.kpi-mora-vivienda::before {{ background: #8b5cf6; }}
-            .kpi-card.kpi-mora-libranza::before {{ background: #ec4899; }}
-            .kpi-card.kpi-mora-sinlibranza::before {{ background: #f59e0b; }}
+            .kpi-card.kpi-mora-vivienda::before {{ background: #6039A3; }}
+            .kpi-card.kpi-mora-libranza::before {{ background: #CD3F94; }}
+            .kpi-card.kpi-mora-sinlibranza::before {{ background: #F78502; }}
             
             /* Sección de gráfico con efecto neón rojo */
             .seccion-mora-neon {{
@@ -4345,36 +4710,36 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: absolute;
                 top: 0; left: 0;
                 width: 100%; height: 3px;
-                background: linear-gradient(90deg, transparent, #dc2626, #ec4899, #dc2626, transparent);
+                background: linear-gradient(90deg, transparent, #C91A15, #CD3F94, #C91A15, transparent);
                 border-radius: 18px 18px 0 0;
                 opacity: 0.85;
             }}
             .seccion-mora-neon .section-title::before {{
-                background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+                background: linear-gradient(180deg, #C91A15 0%, #A0100B 100%);
                 box-shadow: 0 0 8px rgba(220, 38, 38, 0.5);
             }}
             
             /* Scroll container neón mejorado */
             .chart-scroll-neon {{
-                scrollbar-color: #dc2626 #fee2e2;
+                scrollbar-color: #C91A15 #F3DFDF;
             }}
             .chart-scroll-neon::-webkit-scrollbar {{
                 height: 14px;
-                background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+                background: linear-gradient(180deg, #F8E5E4 0%, #F3DFDF 100%);
                 border-radius: 8px;
                 border: 1px solid rgba(220, 38, 38, 0.15);
             }}
             .chart-scroll-neon::-webkit-scrollbar-thumb {{
-                background: linear-gradient(180deg, #ef4444 0%, #dc2626 50%, #991b1b 100%);
+                background: linear-gradient(180deg, #EA544F 0%, #C91A15 50%, #A0100B 100%);
                 border-radius: 8px;
-                border: 2px solid #fee2e2;
+                border: 2px solid #F3DFDF;
                 background-clip: padding-box;
                 box-shadow:
                     0 0 8px rgba(220, 38, 38, 0.5),
                     inset 0 1px 0 rgba(255, 255, 255, 0.3);
             }}
             .chart-scroll-neon::-webkit-scrollbar-thumb:hover {{
-                background: linear-gradient(180deg, #f87171 0%, #ef4444 50%, #dc2626 100%);
+                background: linear-gradient(180deg, #f87171 0%, #EA544F 50%, #C91A15 100%);
                 box-shadow:
                     0 0 12px rgba(220, 38, 38, 0.75),
                     inset 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -4396,7 +4761,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             .mora-grupo-header {{
                 padding: 14px 18px;
-                background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+                background: linear-gradient(135deg, #F8E5E4 0%, #F3DFDF 100%);
                 border-bottom: 1px solid rgba(220, 38, 38, 0.15);
                 display: flex;
                 justify-content: space-between;
@@ -4433,12 +4798,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 font-family: 'JetBrains Mono', monospace;
                 letter-spacing: 0.3px;
             }}
-            .mora-pill-bajo {{ background: rgba(21,128,61,0.12); color: #15803d; border: 1px solid rgba(21,128,61,0.25); }}
-            .mora-pill-medio {{ background: rgba(234,179,8,0.15); color: #a16207; border: 1px solid rgba(234,179,8,0.30); }}
-            .mora-pill-alto {{ background: rgba(249,115,22,0.15); color: #c2410c; border: 1px solid rgba(249,115,22,0.30); }}
+            .mora-pill-bajo {{ background: rgba(21,128,61,0.12); color: #17A53D; border: 1px solid rgba(21,128,61,0.25); }}
+            .mora-pill-medio {{ background: rgba(234,179,8,0.15); color: #AC9500; border: 1px solid rgba(234,179,8,0.30); }}
+            .mora-pill-alto {{ background: rgba(249,115,22,0.15); color: #A75A00; border: 1px solid rgba(249,115,22,0.30); }}
             .mora-pill-critico {{
                 background: rgba(220,38,38,0.12);
-                color: #991b1b;
+                color: #A0100B;
                 border: 1px solid rgba(220,38,38,0.30);
                 box-shadow: 0 0 8px rgba(220, 38, 38, 0.25);
             }}
@@ -4494,10 +4859,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 text-align: center;
             }}
             .cat-A {{ background: #84cc16; }}
-            .cat-B {{ background: #facc15; color: #422006; }}
-            .cat-C {{ background: #f97316; }}
-            .cat-D {{ background: #ef4444; }}
-            .cat-E {{ background: #991b1b; }}
+            .cat-B {{ background: #FBDA03; color: #422006; }}
+            .cat-C {{ background: #F78502; }}
+            .cat-D {{ background: #EA544F; }}
+            .cat-E {{ background: #A0100B; }}
             
             /* Grid resumen por categoría */
             .categoria-mora-grid {{
@@ -4526,28 +4891,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 0 0 4px rgba(132,204,22,0.18), 0 8px 24px rgba(132,204,22,0.30);
             }}
             .categoria-mora-card.cat-card-B {{
-                border-color: #facc15;
+                border-color: #FBDA03;
                 box-shadow: 0 0 0 3px rgba(250,204,21,0.12), 0 4px 14px rgba(250,204,21,0.20);
             }}
             .categoria-mora-card.cat-card-B:hover {{
                 box-shadow: 0 0 0 4px rgba(250,204,21,0.20), 0 8px 24px rgba(250,204,21,0.32);
             }}
             .categoria-mora-card.cat-card-C {{
-                border-color: #f97316;
+                border-color: #F78502;
                 box-shadow: 0 0 0 3px rgba(249,115,22,0.10), 0 4px 14px rgba(249,115,22,0.20);
             }}
             .categoria-mora-card.cat-card-C:hover {{
                 box-shadow: 0 0 0 4px rgba(249,115,22,0.18), 0 8px 24px rgba(249,115,22,0.32);
             }}
             .categoria-mora-card.cat-card-D {{
-                border-color: #ef4444;
+                border-color: #EA544F;
                 box-shadow: 0 0 0 3px rgba(239,68,68,0.10), 0 4px 14px rgba(239,68,68,0.20);
             }}
             .categoria-mora-card.cat-card-D:hover {{
                 box-shadow: 0 0 0 4px rgba(239,68,68,0.18), 0 8px 24px rgba(239,68,68,0.32);
             }}
             .categoria-mora-card.cat-card-E {{
-                border-color: #991b1b;
+                border-color: #A0100B;
                 box-shadow: 0 0 0 3px rgba(153,27,27,0.10), 0 4px 14px rgba(153,27,27,0.22);
             }}
             .categoria-mora-card.cat-card-E:hover {{
@@ -4611,10 +4976,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 24px 60px rgba(0,0,0,0.30);
                 animation: cardEntrada 0.4s ease;
                 position: relative;
-                border: 1.5px solid var(--hist-color, #15803d);
+                border: 1.5px solid var(--hist-color, #17A53D);
                 box-shadow:
                     0 0 0 4px var(--hist-soft, rgba(21,128,61,0.10)),
-                    0 0 0 5px var(--hist-color, #15803d) 22,
+                    0 0 0 5px var(--hist-color, #17A53D) 22,
                     0 24px 60px rgba(0,0,0,0.30);
             }}
             
@@ -4658,7 +5023,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .historico-tag {{
                 display: inline-block;
                 background: var(--hist-soft, rgba(21,128,61,0.12));
-                color: var(--hist-deep, #166534);
+                color: var(--hist-deep, #11782C);
                 padding: 5px 12px;
                 border-radius: 999px;
                 font-size: 10.5px;
@@ -4666,7 +5031,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 text-transform: uppercase;
                 letter-spacing: 0.8px;
                 margin-bottom: 10px;
-                border: 1px solid var(--hist-color, #15803d);
+                border: 1px solid var(--hist-color, #17A53D);
             }}
             .historico-card h2 {{
                 font-size: 22px;
@@ -4688,7 +5053,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 background: var(--hist-soft, rgba(21,128,61,0.10));
                 padding: 12px 20px;
                 border-radius: 14px;
-                border: 1px solid var(--hist-color, #15803d);
+                border: 1px solid var(--hist-color, #17A53D);
             }}
             .historico-stat-label {{
                 font-size: 10.5px;
@@ -4700,7 +5065,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .historico-stat-value {{
                 font-size: 28px;
                 font-weight: 800;
-                color: var(--hist-color, #15803d);
+                color: var(--hist-color, #17A53D);
                 font-family: 'JetBrains Mono', monospace;
                 letter-spacing: -1px;
                 line-height: 1.1;
@@ -4716,25 +5081,25 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 border-radius: 12px;
                 background: linear-gradient(180deg, #fafbfc 0%, #f5f7f9 100%);
                 border: 1px solid #e4e6e0;
-                scrollbar-color: var(--hist-color, #15803d) var(--hist-soft, #f0fdf4);
+                scrollbar-color: var(--hist-color, #17A53D) var(--hist-soft, #E8F6EC);
             }}
             .historico-chart-scroll::-webkit-scrollbar {{
                 height: 16px;
-                background: var(--hist-soft, #f0fdf4);
+                background: var(--hist-soft, #E8F6EC);
                 border-radius: 8px;
                 border: 1px solid var(--hist-color-30, rgba(21,128,61,0.20));
             }}
             .historico-chart-scroll::-webkit-scrollbar-thumb {{
-                background: linear-gradient(180deg, var(--hist-color-light, #22c55e) 0%, var(--hist-color, #15803d) 50%, var(--hist-deep, #14532d) 100%);
+                background: linear-gradient(180deg, var(--hist-color-light, #26D354) 0%, var(--hist-color, #17A53D) 50%, var(--hist-deep, #0C5E22) 100%);
                 border-radius: 8px;
-                border: 2px solid var(--hist-soft, #f0fdf4);
+                border: 2px solid var(--hist-soft, #E8F6EC);
                 background-clip: padding-box;
                 box-shadow:
                     0 0 10px var(--hist-glow, rgba(21,128,61,0.5)),
                     inset 0 1px 0 rgba(255,255,255,0.35);
             }}
             .historico-chart-scroll::-webkit-scrollbar-thumb:hover {{
-                background: linear-gradient(180deg, var(--hist-color-lighter, #4ade80) 0%, var(--hist-color-light, #22c55e) 50%, var(--hist-color, #15803d) 100%);
+                background: linear-gradient(180deg, var(--hist-color-lighter, #77DE93) 0%, var(--hist-color-light, #26D354) 50%, var(--hist-color, #17A53D) 100%);
                 box-shadow:
                     0 0 16px var(--hist-glow, rgba(21,128,61,0.75)),
                     inset 0 1px 0 rgba(255,255,255,0.45);
@@ -4776,7 +5141,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             .historico-hint {{
                 font-size: 11px;
-                color: var(--hist-color, #15803d);
+                color: var(--hist-color, #17A53D);
                 text-align: center;
                 margin-top: 8px;
                 font-style: italic;
@@ -4798,7 +5163,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 border-radius: 6px;
             }}
             .historico-scrollable::-webkit-scrollbar-thumb {{
-                background: var(--hist-color, #15803d);
+                background: var(--hist-color, #17A53D);
                 border-radius: 6px;
                 opacity: 0.7;
             }}
@@ -4821,8 +5186,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 bottom: 3px;
                 width: 4px;
                 border-radius: 3px;
-                background: var(--hist-color, #15803d);
-                box-shadow: 0 0 8px var(--hist-color, #15803d);
+                background: var(--hist-color, #17A53D);
+                box-shadow: 0 0 8px var(--hist-color, #17A53D);
             }}
             
             .historico-leyenda-chart {{
@@ -4877,14 +5242,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             .historico-tabla-resultado {{
                 background: linear-gradient(90deg, var(--hist-soft, rgba(21,128,61,0.08)) 0%, transparent 100%);
-                border-top: 2px solid var(--hist-color, #15803d) !important;
+                border-top: 2px solid var(--hist-color, #17A53D) !important;
             }}
             .historico-tabla-resultado .historico-tabla-lbl {{
-                color: var(--hist-deep, #166534);
+                color: var(--hist-deep, #11782C);
                 font-weight: 700;
             }}
             .historico-tabla-resultado .historico-tabla-val {{
-                color: var(--hist-deep, #166534);
+                color: var(--hist-deep, #11782C);
                 font-size: 16px;
             }}
             
@@ -5056,8 +5421,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === Colores por modalidad === */
             .mod-vivienda {{
-                --mod-color: #8b5cf6;
-                border-color: #c4b5fd;
+                --mod-color: #6039A3;
+                border-color: #D6CCE6;
                 box-shadow: 0 0 0 3px rgba(139,92,246,0.08), 0 4px 14px rgba(139,92,246,0.15);
             }}
             .mod-vivienda:hover {{
@@ -5065,8 +5430,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             .mod-consumo-cl {{
-                --mod-color: #ec4899;
-                border-color: #f9a8d4;
+                --mod-color: #CD3F94;
+                border-color: #E7BED7;
                 box-shadow: 0 0 0 3px rgba(236,72,153,0.08), 0 4px 14px rgba(236,72,153,0.15);
             }}
             .mod-consumo-cl:hover {{
@@ -5074,8 +5439,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             .mod-consumo-sl {{
-                --mod-color: #f59e0b;
-                border-color: #fcd34d;
+                --mod-color: #F78502;
+                border-color: #F4CC9E;
                 box-shadow: 0 0 0 3px rgba(245,158,11,0.08), 0 4px 14px rgba(245,158,11,0.15);
             }}
             .mod-consumo-sl:hover {{
@@ -5083,7 +5448,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             .mod-microcredito {{
-                --mod-color: #06b6d4;
+                --mod-color: #36BAA8;
                 border-color: #67e8f9;
                 box-shadow: 0 0 0 3px rgba(6,182,212,0.08), 0 4px 14px rgba(6,182,212,0.15);
             }}
@@ -5092,8 +5457,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             .mod-comercial {{
-                --mod-color: #14b8a6;
-                border-color: #5eead4;
+                --mod-color: #36BAA8;
+                border-color: #ABDED7;
                 box-shadow: 0 0 0 3px rgba(20,184,166,0.08), 0 4px 14px rgba(20,184,166,0.15);
             }}
             .mod-comercial:hover {{
@@ -5102,7 +5467,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Card especial para "Cartera Total por Riesgo" en el módulo Crecimiento */
             .mod-riesgo-crec {{
-                --mod-color: #1e40af;
+                --mod-color: #045988;
                 border-color: #93c5fd;
                 box-shadow: 0 0 0 3px rgba(30,64,175,0.08), 0 4px 14px rgba(30,64,175,0.18);
             }}
@@ -5112,7 +5477,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* === Sección modalidad con borde sutil === */
             .seccion-modalidad-riesgo .section-title::before {{
-                background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
+                background: linear-gradient(180deg, #045988 0%, #033F61 100%);
                 box-shadow: 0 0 8px rgba(30, 64, 175, 0.45);
             }}
             
@@ -5223,6 +5588,133 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: relative;
                 width: 100%;
             }}
+            /* ===== Cards elegantes de totales de Depósitos ===== */
+            .dep-total-cards {{
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 14px;
+                margin: 4px 0 24px;
+            }}
+            .dep-total-card {{
+                position: relative;
+                background: linear-gradient(150deg, rgba(var(--c-rgb),0.10) 0%, rgba(var(--c-rgb),0.02) 60%, #ffffff 100%);
+                border: 1px solid rgba(var(--c-rgb),0.22);
+                border-radius: 16px;
+                padding: 16px 16px 14px;
+                box-shadow: 0 2px 10px rgba(var(--c-rgb),0.10);
+                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                overflow: hidden;
+            }}
+            .dep-total-card::before {{
+                content: '';
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 3px;
+                background: var(--c);
+            }}
+            .dep-total-card:hover {{
+                transform: translateY(-3px);
+                box-shadow: 0 10px 26px rgba(var(--c-rgb),0.24);
+            }}
+            .dep-total-card-top {{
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 10px;
+            }}
+            .dep-total-card-dot {{
+                width: 10px; height: 10px;
+                border-radius: 50%;
+                background: var(--c);
+                flex: 0 0 auto;
+                box-shadow: 0 0 0 3px rgba(var(--c-rgb),0.15);
+            }}
+            .dep-total-card-label {{
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+                text-transform: uppercase;
+                color: #6b7268;
+                line-height: 1.2;
+            }}
+            .dep-total-card-valor {{
+                font-size: 26px;
+                font-weight: 800;
+                letter-spacing: -0.5px;
+                color: var(--c);
+                line-height: 1.1;
+                margin-bottom: 8px;
+            }}
+            .dep-total-card-foot {{
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+            }}
+            .dep-total-card-ref {{
+                color: #a0a59c;
+                font-style: italic;
+            }}
+            .dep-total-card--principal .dep-total-card-valor {{
+                font-size: 28px;
+            }}
+            @media (max-width: 1100px) {{
+                .dep-total-cards {{ grid-template-columns: repeat(3, 1fr); }}
+            }}
+            @media (max-width: 680px) {{
+                .dep-total-cards {{ grid-template-columns: repeat(2, 1fr); }}
+            }}
+            @media (max-width: 460px) {{
+                .dep-total-cards {{ grid-template-columns: 1fr; }}
+            }}
+            /* ===== Cuadrícula 2x2 del módulo Crecimiento de Depósitos ===== */
+            .dep-grid-2x2 {{
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 18px;
+                margin-top: 6px;
+            }}
+            .dep-mini-card {{
+                background: linear-gradient(135deg, #fafbfc 0%, #f5f7f9 100%);
+                border: 1px solid #eef0f2;
+                border-radius: 14px;
+                padding: 14px 14px 8px 14px;
+                box-shadow: 0 1px 3px rgba(16,24,40,0.04);
+                min-width: 0;
+                overflow: hidden;
+            }}
+            .dep-mini-card .historico-flex-wrap {{ min-width: 0; }}
+            .dep-mini-card .chart-scroll-container {{ min-width: 0; flex: 1 1 0; }}
+            .dep-mini-inner {{
+                height: 230px;
+                min-width: 100%;
+            }}
+            .dep-mini-titulo {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 13.5px;
+                font-weight: 700;
+                color: #1c2520;
+                margin-bottom: 6px;
+                letter-spacing: 0.2px;
+            }}
+            .dep-mini-punto {{
+                width: 11px;
+                height: 11px;
+                border-radius: 50%;
+                flex: 0 0 auto;
+                box-shadow: 0 0 0 3px rgba(0,0,0,0.04);
+            }}
+            .dep-mini-inner {{
+                height: 230px;
+            }}
+            .dep-grid-2x2 .historico-eje-fijo-small {{
+                height: 230px;
+            }}
+            @media (max-width: 760px) {{
+                .dep-grid-2x2 {{ grid-template-columns: 1fr; }}
+            }}
             .historico-eje-fijo {{
                 flex: 0 0 80px;
                 width: 80px;
@@ -5310,7 +5802,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 text-align: right;
             }}
             .seccion-modalidad-mora .section-title::before {{
-                background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+                background: linear-gradient(180deg, #C91A15 0%, #A0100B 100%);
                 box-shadow: 0 0 8px rgba(220, 38, 38, 0.45);
             }}
             
@@ -5319,18 +5811,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 display: none;
             }}
             .gauge-card-cobertura::before {{
-                background: linear-gradient(90deg, #dc2626 0%, #f97316 30%, #eab308 60%, #14b8a6 100%);
+                background: linear-gradient(90deg, #C91A15 0%, #F78502 30%, #E2C403 60%, #36BAA8 100%);
             }}
             
             /* KPIs específicos de Cobertura */
-            .kpi-card.kpi-cobertura-consumo::before {{ background: #f59e0b; }}
-            .kpi-card.kpi-cobertura-vivienda::before {{ background: #8b5cf6; }}
-            .kpi-card.kpi-cobertura-otros::before {{ background: #14b8a6; }}
+            .kpi-card.kpi-cobertura-consumo::before {{ background: #F78502; }}
+            .kpi-card.kpi-cobertura-vivienda::before {{ background: #6039A3; }}
+            .kpi-card.kpi-cobertura-otros::before {{ background: #36BAA8; }}
             
             /* Sección de gráfico con efecto neón teal */
             .seccion-cobertura-neon {{
                 position: relative;
-                background: linear-gradient(180deg, #ffffff 0%, #f0fdfa 100%);
+                background: linear-gradient(180deg, #ffffff 0%, #D8EEEB 100%);
                 border: 1.5px solid rgba(20, 184, 166, 0.30);
                 box-shadow:
                     0 0 0 3px rgba(20, 184, 166, 0.10),
@@ -5342,36 +5834,36 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: absolute;
                 top: 0; left: 0;
                 width: 100%; height: 3px;
-                background: linear-gradient(90deg, transparent, #14b8a6, #2dd4bf, #14b8a6, transparent);
+                background: linear-gradient(90deg, transparent, #36BAA8, #62CBBD, #36BAA8, transparent);
                 border-radius: 18px 18px 0 0;
                 opacity: 0.9;
             }}
             .seccion-cobertura-neon .section-title::before {{
-                background: linear-gradient(180deg, #14b8a6 0%, #0f766e 100%);
+                background: linear-gradient(180deg, #36BAA8 0%, #237C70 100%);
                 box-shadow: 0 0 10px rgba(20, 184, 166, 0.55);
             }}
             
             /* Scroll container neón teal */
             .chart-scroll-cobertura {{
-                scrollbar-color: #14b8a6 #ccfbf1;
+                scrollbar-color: #36BAA8 #D8EEEB;
             }}
             .chart-scroll-cobertura::-webkit-scrollbar {{
                 height: 14px;
-                background: linear-gradient(180deg, #f0fdfa 0%, #ccfbf1 100%);
+                background: linear-gradient(180deg, #D8EEEB 0%, #D8EEEB 100%);
                 border-radius: 8px;
                 border: 1px solid rgba(20, 184, 166, 0.15);
             }}
             .chart-scroll-cobertura::-webkit-scrollbar-thumb {{
-                background: linear-gradient(180deg, #2dd4bf 0%, #14b8a6 50%, #0f766e 100%);
+                background: linear-gradient(180deg, #62CBBD 0%, #36BAA8 50%, #237C70 100%);
                 border-radius: 8px;
-                border: 2px solid #ccfbf1;
+                border: 2px solid #D8EEEB;
                 background-clip: padding-box;
                 box-shadow:
                     0 0 10px rgba(20, 184, 166, 0.55),
                     inset 0 1px 0 rgba(255, 255, 255, 0.35);
             }}
             .chart-scroll-cobertura::-webkit-scrollbar-thumb:hover {{
-                background: linear-gradient(180deg, #5eead4 0%, #2dd4bf 50%, #14b8a6 100%);
+                background: linear-gradient(180deg, #ABDED7 0%, #62CBBD 50%, #36BAA8 100%);
                 box-shadow:
                     0 0 16px rgba(20, 184, 166, 0.80),
                     inset 0 1px 0 rgba(255, 255, 255, 0.45);
@@ -5379,7 +5871,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Sección modalidad cobertura */
             .seccion-modalidad-cobertura .section-title::before {{
-                background: linear-gradient(180deg, #14b8a6 0%, #0f766e 100%);
+                background: linear-gradient(180deg, #36BAA8 0%, #237C70 100%);
                 box-shadow: 0 0 8px rgba(20, 184, 166, 0.50);
             }}
             
@@ -5403,18 +5895,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 display: none !important;
             }}
             .gauge-card-crecimiento::before {{
-                background: linear-gradient(90deg, #dc2626 0%, #eab308 30%, #15803d 60%, #6366f1 100%);
+                background: linear-gradient(90deg, #C91A15 0%, #E2C403 30%, #17A53D 60%, #088DD5 100%);
             }}
-            .gauge-zone-indigo-crec {{ stroke: #6366f1; }}
-            .gauge-center-value.zona-crec-negativo {{ fill: #dc2626; }}
-            .gauge-center-value.zona-crec-bajo {{ fill: #eab308; }}
-            .gauge-center-value.zona-crec-bueno {{ fill: #15803d; }}
-            .gauge-center-value.zona-crec-alto {{ fill: #6366f1; }}
+            .gauge-zone-indigo-crec {{ stroke: #088DD5; }}
+            .gauge-center-value.zona-crec-negativo {{ fill: #C91A15; }}
+            .gauge-center-value.zona-crec-bajo {{ fill: #E2C403; }}
+            .gauge-center-value.zona-crec-bueno {{ fill: #17A53D; }}
+            .gauge-center-value.zona-crec-alto {{ fill: #088DD5; }}
             
             /* KPIs específicos de Crecimiento */
-            .kpi-card.kpi-crec-consumo::before {{ background: #f59e0b; }}
-            .kpi-card.kpi-crec-vivienda::before {{ background: #8b5cf6; }}
-            .kpi-card.kpi-crec-riesgo::before {{ background: #1e40af; }}
+            .kpi-card.kpi-crec-consumo::before {{ background: #F78502; }}
+            .kpi-card.kpi-crec-vivienda::before {{ background: #6039A3; }}
+            .kpi-card.kpi-crec-riesgo::before {{ background: #045988; }}
             
             /* Sección de gráfico con efecto neón índigo */
             .seccion-crecimiento-neon {{
@@ -5431,18 +5923,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: absolute;
                 top: 0; left: 0;
                 width: 100%; height: 3px;
-                background: linear-gradient(90deg, transparent, #6366f1, #8b5cf6, #6366f1, transparent);
+                background: linear-gradient(90deg, transparent, #088DD5, #6039A3, #088DD5, transparent);
                 border-radius: 18px 18px 0 0;
                 opacity: 0.9;
             }}
             .seccion-crecimiento-neon .section-title::before {{
-                background: linear-gradient(180deg, #6366f1 0%, #4338ca 100%);
+                background: linear-gradient(180deg, #088DD5 0%, #045988 100%);
                 box-shadow: 0 0 10px rgba(99, 102, 241, 0.55);
             }}
             
             /* Scroll container neón índigo */
             .chart-scroll-crecimiento {{
-                scrollbar-color: #6366f1 #e0e7ff;
+                scrollbar-color: #088DD5 #e0e7ff;
             }}
             .chart-scroll-crecimiento::-webkit-scrollbar {{
                 height: 14px;
@@ -5451,7 +5943,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 border: 1px solid rgba(99, 102, 241, 0.15);
             }}
             .chart-scroll-crecimiento::-webkit-scrollbar-thumb {{
-                background: linear-gradient(180deg, #818cf8 0%, #6366f1 50%, #4338ca 100%);
+                background: linear-gradient(180deg, #2CAAEE 0%, #088DD5 50%, #045988 100%);
                 border-radius: 8px;
                 border: 2px solid #e0e7ff;
                 background-clip: padding-box;
@@ -5460,7 +5952,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     inset 0 1px 0 rgba(255, 255, 255, 0.35);
             }}
             .chart-scroll-crecimiento::-webkit-scrollbar-thumb:hover {{
-                background: linear-gradient(180deg, #a5b4fc 0%, #818cf8 50%, #6366f1 100%);
+                background: linear-gradient(180deg, #89CAED 0%, #2CAAEE 50%, #088DD5 100%);
                 box-shadow:
                     0 0 16px rgba(99, 102, 241, 0.80),
                     inset 0 1px 0 rgba(255, 255, 255, 0.45);
@@ -5468,7 +5960,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Sección modalidad crecimiento */
             .seccion-modalidad-crecimiento .section-title::before {{
-                background: linear-gradient(180deg, #6366f1 0%, #4338ca 100%);
+                background: linear-gradient(180deg, #088DD5 0%, #045988 100%);
                 box-shadow: 0 0 8px rgba(99, 102, 241, 0.55);
             }}
             
@@ -5477,13 +5969,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 display: none;
             }}
             .gauge-card-riesgo::before {{
-                background: linear-gradient(90deg, #15803d 0%, #eab308 40%, #f97316 70%, #1e40af 100%);
+                background: linear-gradient(90deg, #17A53D 0%, #E2C403 40%, #F78502 70%, #045988 100%);
             }}
             
             /* KPIs específicos de Riesgo */
-            .kpi-card.kpi-riesgo-A::before {{ background: #15803d; }}
-            .kpi-card.kpi-riesgo-CD::before {{ background: #f97316; }}
-            .kpi-card.kpi-riesgo-E::before {{ background: #1e40af; }}
+            .kpi-card.kpi-riesgo-A::before {{ background: #17A53D; }}
+            .kpi-card.kpi-riesgo-CD::before {{ background: #F78502; }}
+            .kpi-card.kpi-riesgo-E::before {{ background: #045988; }}
             
             /* Sección de gráfico con efecto neón azul oscuro */
             .seccion-riesgo-neon {{
@@ -5500,36 +5992,36 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 position: absolute;
                 top: 0; left: 0;
                 width: 100%; height: 3px;
-                background: linear-gradient(90deg, transparent, #1e40af, #3b82f6, #1e40af, transparent);
+                background: linear-gradient(90deg, transparent, #045988, #2CAAEE, #045988, transparent);
                 border-radius: 18px 18px 0 0;
                 opacity: 0.9;
             }}
             .seccion-riesgo-neon .section-title::before {{
-                background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
+                background: linear-gradient(180deg, #045988 0%, #033F61 100%);
                 box-shadow: 0 0 10px rgba(30, 64, 175, 0.55);
             }}
             
             /* Scroll container neón azul */
             .chart-scroll-riesgo {{
-                scrollbar-color: #1e40af #dbeafe;
+                scrollbar-color: #045988 #C1E1F2;
             }}
             .chart-scroll-riesgo::-webkit-scrollbar {{
                 height: 14px;
-                background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+                background: linear-gradient(180deg, #E8F2FA 0%, #C1E1F2 100%);
                 border-radius: 8px;
                 border: 1px solid rgba(30, 64, 175, 0.15);
             }}
             .chart-scroll-riesgo::-webkit-scrollbar-thumb {{
-                background: linear-gradient(180deg, #3b82f6 0%, #1e40af 50%, #1e3a8a 100%);
+                background: linear-gradient(180deg, #2CAAEE 0%, #045988 50%, #033F61 100%);
                 border-radius: 8px;
-                border: 2px solid #dbeafe;
+                border: 2px solid #C1E1F2;
                 background-clip: padding-box;
                 box-shadow:
                     0 0 8px rgba(30, 64, 175, 0.5),
                     inset 0 1px 0 rgba(255, 255, 255, 0.3);
             }}
             .chart-scroll-riesgo::-webkit-scrollbar-thumb:hover {{
-                background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 50%, #1e40af 100%);
+                background: linear-gradient(180deg, #89CAED 0%, #2CAAEE 50%, #045988 100%);
                 box-shadow:
                     0 0 12px rgba(30, 64, 175, 0.75),
                     inset 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -5549,7 +6041,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 font-size: 12.5px;
             }}
             .riesgo-bruta-card thead tr {{
-                background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
+                background: linear-gradient(180deg, #045988 0%, #033F61 100%);
                 color: white;
             }}
             .riesgo-bruta-card thead th {{
@@ -5571,7 +6063,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .riesgo-bruta-card tbody tr:hover {{ background: #f0f9ff; }}
             .riesgo-bruta-card .codigo {{
                 font-family: 'JetBrains Mono', monospace;
-                color: #1e40af;
+                color: #045988;
                 font-weight: 600;
                 font-size: 12px;
                 width: 80px;
@@ -5590,29 +6082,29 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 font-weight: 400;
             }}
             .riesgo-bruta-card tfoot tr {{
-                background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
-                border-top: 2px solid #1e40af;
+                background: linear-gradient(180deg, #E8F2FA 0%, #C1E1F2 100%);
+                border-top: 2px solid #045988;
             }}
             .riesgo-bruta-card tfoot td {{
                 padding: 12px 16px;
                 font-weight: 700;
-                color: #1e3a8a;
+                color: #033F61;
                 font-size: 13px;
             }}
             .riesgo-bruta-card tfoot td.num {{
-                color: #1e40af;
+                color: #045988;
                 font-size: 14px;
             }}
             
             /* Card de categoria con estilo azul */
             .categoria-mora-card.cat-card-A-riesgo {{
-                border-color: #15803d;
+                border-color: #17A53D;
                 box-shadow: 0 0 0 3px rgba(21,128,61,0.10), 0 4px 14px rgba(21,128,61,0.18);
             }}
             .categoria-mora-card.cat-card-A-riesgo:hover {{
                 box-shadow: 0 0 0 4px rgba(21,128,61,0.18), 0 8px 24px rgba(21,128,61,0.30);
             }}
-            .cat-A-riesgo {{ background: #15803d !important; color: white !important; }}
+            .cat-A-riesgo {{ background: #17A53D !important; color: white !important; }}
             
             
             /* Responsive */
@@ -5626,6 +6118,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         </style>
     </head>
     <body>
+        
+        <!-- ========== BOTÓN FLOTANTE: VOLVER AL INICIO ========== -->
+        <button id="btn-inicio-flotante" onclick="volverAlMenu()" title="Volver a la página principal" aria-label="Inicio">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9.5L12 3l9 6.5"/>
+                <path d="M5 9.5V21h14V9.5"/>
+                <path d="M9 21v-6h6v6"/>
+            </svg>
+            <span>Inicio</span>
+        </button>
         
         <!-- ========== MENÚ PRINCIPAL (PANTALLA INICIAL) ========== -->
         <div class="menu-principal" id="menu-principal">
@@ -5708,23 +6210,6 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                 </div>
                 
-                <!-- SOLVENCIA (ACTIVO) -->
-                <div class="modulo-card modulo-solvencia" onclick="abrirSolvencia()">
-                    <span class="modulo-badge activo">Disponible</span>
-                    <div class="modulo-icono">
-                        <svg viewBox="0 0 24 24">
-                            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/>
-                            <polyline points="9 12 11 14 15 10"/>
-                        </svg>
-                    </div>
-                    <h3 class="modulo-titulo">Solvencia</h3>
-                    <p class="modulo-descripcion">Patrimonio técnico, APR, límites operativos y fondo de liquidez.</p>
-                    <span class="modulo-accion">
-                        Abrir módulo
-                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-                    </span>
-                </div>
-                
             </div>
             
             <!-- ========== TABLERO RESUMEN: 2 MATRICES DE INDICADORES ========== -->
@@ -5732,6 +6217,30 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="tablero-header">
                     <h2 class="tablero-titulo">Tablero de Indicadores</h2>
                     <p class="tablero-sub">Resultados de todos los indicadores en cada período · <span id="tablero-rango">—</span></p>
+                </div>
+                
+                <!-- Panel: generar informe PDF del tablero -->
+                <div class="informe-panel">
+                    <div class="informe-panel-info">
+                        <div class="informe-panel-ico">📄</div>
+                        <div>
+                            <div class="informe-panel-titulo">Informe Analítico en PDF</div>
+                            <div class="informe-panel-sub">Describe el comportamiento y variaciones de los indicadores en el rango elegido</div>
+                        </div>
+                    </div>
+                    <div class="informe-panel-controles">
+                        <div class="informe-campo">
+                            <label for="informe-desde">Desde</label>
+                            <select id="informe-desde"></select>
+                        </div>
+                        <div class="informe-campo">
+                            <label for="informe-hasta">Hasta</label>
+                            <select id="informe-hasta"></select>
+                        </div>
+                        <button class="btn-informe" id="btn-informe" onclick="generarInformeTablero()">
+                            <span>Generar Informe</span>
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- MATRIZ 1: INDICADORES EN PORCENTAJE -->
@@ -5773,60 +6282,24 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>Volver al menú principal</span>
                 </button>
-                <h1 style="color: #0e7490;">Módulo Activo</h1>
+                <h1 style="color: #237C70;">Módulo Activo</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
             
             <div class="menu-grid">
                 
                 <!-- ÍNDICE DE MORA (ACTIVO) -->
-                <div class="modulo-card modulo-mora" onclick="abrirIndiceMora()">
+                <!-- EVOLUCIÓN DEL ACTIVO (cuenta 1) -->
+                <div class="modulo-card modulo-evolucion-activo" onclick="abrirEvolucionActivo()">
                     <span class="modulo-badge activo">Disponible</span>
                     <div class="modulo-icono">
                         <svg viewBox="0 0 24 24">
-                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
-                            <polyline points="12 7 12 13 16 15"/>
-                            <path d="M4.5 4.5L7 7"/>
-                            <path d="M19.5 4.5L17 7"/>
+                            <path d="M3 17l6-6 4 4 8-8"/>
+                            <polyline points="14 7 21 7 21 14"/>
                         </svg>
                     </div>
-                    <h3 class="modulo-titulo">Índice de Mora</h3>
-                    <p class="modulo-descripcion">Análisis de morosidad por categoría y grupo de cartera, con histórico completo.</p>
-                    <span class="modulo-accion">
-                        Abrir módulo
-                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-                    </span>
-                </div>
-                
-                <!-- ÍNDICE DE RIESGO (ACTIVO) -->
-                <div class="modulo-card modulo-riesgo" onclick="abrirIndiceRiesgo()">
-                    <span class="modulo-badge activo">Disponible</span>
-                    <div class="modulo-icono">
-                        <svg viewBox="0 0 24 24">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                            <path d="M9 12l2 2 4-4"/>
-                        </svg>
-                    </div>
-                    <h3 class="modulo-titulo">Índice de Riesgo</h3>
-                    <p class="modulo-descripcion">Calidad de cartera por categoría de riesgo crediticio (A-E) con histórico.</p>
-                    <span class="modulo-accion">
-                        Abrir módulo
-                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-                    </span>
-                </div>
-                
-                <!-- COBERTURA DE CARTERA (ACTIVO) -->
-                <div class="modulo-card modulo-cobertura" onclick="abrirCobertura()">
-                    <span class="modulo-badge activo">Disponible</span>
-                    <div class="modulo-icono">
-                        <svg viewBox="0 0 24 24">
-                            <path d="M12 2L4 7v5c0 5 3 9 8 11 5-2 8-6 8-11V7l-8-5z"/>
-                            <path d="M9 12l2 2 4-4"/>
-                            <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                    </div>
-                    <h3 class="modulo-titulo">Cobertura de Cartera</h3>
-                    <p class="modulo-descripcion">Deterioro sobre cartera vencida por modalidad: indicador de provisiones.</p>
+                    <h3 class="modulo-titulo">Evolución del Activo</h3>
+                    <p class="modulo-descripcion">Saldo total del Activo (cuenta 1) y sus subcuentas, evolución mes a mes.</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -5851,17 +6324,54 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                 </div>
                 
-                <!-- EVOLUCIÓN DEL ACTIVO (cuenta 1) -->
-                <div class="modulo-card modulo-evolucion-activo" onclick="abrirEvolucionActivo()">
+                <!-- COBERTURA DE CARTERA (ACTIVO) -->
+                <div class="modulo-card modulo-cobertura" onclick="abrirCobertura()">
                     <span class="modulo-badge activo">Disponible</span>
                     <div class="modulo-icono">
                         <svg viewBox="0 0 24 24">
-                            <path d="M3 17l6-6 4 4 8-8"/>
-                            <polyline points="14 7 21 7 21 14"/>
+                            <path d="M12 2L4 7v5c0 5 3 9 8 11 5-2 8-6 8-11V7l-8-5z"/>
+                            <path d="M9 12l2 2 4-4"/>
+                            <circle cx="12" cy="12" r="3"/>
                         </svg>
                     </div>
-                    <h3 class="modulo-titulo">Evolución del Activo</h3>
-                    <p class="modulo-descripcion">Saldo total del Activo (cuenta 1) y sus subcuentas, evolución mes a mes.</p>
+                    <h3 class="modulo-titulo">Cobertura de Cartera</h3>
+                    <p class="modulo-descripcion">Deterioro sobre cartera vencida por modalidad: indicador de provisiones.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- ÍNDICE DE RIESGO (ACTIVO) -->
+                <div class="modulo-card modulo-riesgo" onclick="abrirIndiceRiesgo()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <path d="M9 12l2 2 4-4"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Índice de Riesgo</h3>
+                    <p class="modulo-descripcion">Calidad de cartera por categoría de riesgo crediticio (A-E) con histórico.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- ÍNDICE DE MORA (ACTIVO) -->
+                <div class="modulo-card modulo-mora" onclick="abrirIndiceMora()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
+                            <polyline points="12 7 12 13 16 15"/>
+                            <path d="M4.5 4.5L7 7"/>
+                            <path d="M19.5 4.5L17 7"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Índice de Mora</h3>
+                    <p class="modulo-descripcion">Análisis de morosidad por categoría y grupo de cartera, con histórico completo.</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -5878,7 +6388,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>Volver al menú principal</span>
                 </button>
-                <h1 style="color: #b45309;">Módulo Pasivo</h1>
+                <h1 style="color: #045988;">Módulo Pasivo</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
             
@@ -5899,6 +6409,152 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
+                
+                <!-- CRECIMIENTO DE DEPÓSITOS -->
+                <div class="modulo-card modulo-evolucion-pasivo" onclick="abrirCrecimientoDepositos()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 3v18h18"/>
+                            <polyline points="7 13 11 9 14 12 19 6"/>
+                            <polyline points="14 6 19 6 19 11"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Crecimiento de Depósitos</h3>
+                    <p class="modulo-descripcion">Captaciones por producto: Ahorro a la Vista, CDAT, Contractual y DAES, con crecimiento mensual.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== DASHBOARD: CRECIMIENTO DE DEPÓSITOS ========== -->
+        <div class="container oculto" id="depositos-root">
+            <div class="dashboard-header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-pasivo" onclick="volverAlSubmenuPasivo()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Pasivo</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#045988;">Crecimiento de Depósitos</h1>
+                    <div class="subtitle">Captaciones por producto · Crecimiento mensual</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card">
+                            <label for="depositos-filtro-anio">Año</label>
+                            <select id="depositos-filtro-anio"></select>
+                        </div>
+                        <div class="filtro-card">
+                            <label for="depositos-filtro-mes">Mes</label>
+                            <select id="depositos-filtro-mes"></select>
+                        </div>
+                    </div>
+                    <div class="cobertura-toggle-wrap">
+                        <span class="cobertura-toggle-label">Tipo de saldo</span>
+                        <div class="cobertura-toggle" id="depositos-toggle">
+                            <button class="cobertura-toggle-btn activo" data-modo="total" onclick="cambiarModoDepositos('total')">Saldo Total</button>
+                            <button class="cobertura-toggle-btn" data-modo="capital" onclick="cambiarModoDepositos('capital')">Saldo Capital</button>
+                        </div>
+                        <span class="cobertura-toggle-hint">Capital = saldo sin intereses por pagar</span>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-depositos" onclick="descargarExcelDepositos()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- KPIs -->
+            <div class="dep-total-cards" id="depositos-kpis"></div>
+            
+            <!-- Gráfico histórico TOTAL (grande) -->
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica de Depósitos</h2>
+                <p class="seccion-subtitulo" id="depositos-graf-sub">Saldo total de captaciones · Millones COP</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo">
+                        <div id="chartDepositosTotal-axis-container" class="eje-y-html-container"></div>
+                    </div>
+                    <div class="chart-scroll-container" id="depositosTotal-scroll-container">
+                        <div class="chart-inner" id="depositosTotal-inner">
+                            <canvas id="chartDepositosTotal"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            
+            <!-- Cuadrícula 2x2: un gráfico por producto -->
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución por Producto</h2>
+                <p class="seccion-subtitulo">Saldo histórico de cada producto de captación · Millones COP</p>
+                <div class="dep-grid-2x2">
+                    <div class="dep-mini-card">
+                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-ahorro_vista"></span>Ahorro a la Vista</div>
+                        <div class="historico-flex-wrap">
+                            <div class="historico-eje-fijo historico-eje-fijo-small">
+                                <div id="chartDep-ahorro_vista-axis-container" class="eje-y-html-container"></div>
+                            </div>
+                            <div class="chart-scroll-container" id="dep-ahorro_vista-scroll-container">
+                                <div class="chart-inner dep-mini-inner" id="dep-ahorro_vista-inner">
+                                    <canvas id="chartDep-ahorro_vista"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dep-mini-card">
+                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-cdat"></span>CDAT</div>
+                        <div class="historico-flex-wrap">
+                            <div class="historico-eje-fijo historico-eje-fijo-small">
+                                <div id="chartDep-cdat-axis-container" class="eje-y-html-container"></div>
+                            </div>
+                            <div class="chart-scroll-container" id="dep-cdat-scroll-container">
+                                <div class="chart-inner dep-mini-inner" id="dep-cdat-inner">
+                                    <canvas id="chartDep-cdat"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dep-mini-card">
+                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-contractual"></span>Ahorro Contractual</div>
+                        <div class="historico-flex-wrap">
+                            <div class="historico-eje-fijo historico-eje-fijo-small">
+                                <div id="chartDep-contractual-axis-container" class="eje-y-html-container"></div>
+                            </div>
+                            <div class="chart-scroll-container" id="dep-contractual-scroll-container">
+                                <div class="chart-inner dep-mini-inner" id="dep-contractual-inner">
+                                    <canvas id="chartDep-contractual"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dep-mini-card">
+                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-daes"></span>DAES</div>
+                        <div class="historico-flex-wrap">
+                            <div class="historico-eje-fijo historico-eje-fijo-small">
+                                <div id="chartDep-daes-axis-container" class="eje-y-html-container"></div>
+                            </div>
+                            <div class="chart-scroll-container" id="dep-daes-scroll-container">
+                                <div class="chart-inner dep-mini-inner" id="dep-daes-inner">
+                                    <canvas id="chartDep-daes"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-hint">Cada gráfico se desplaza por los períodos con su barra inferior</div>
+            </div>
+            
+            <!-- Tabla de productos -->
+            <div class="section">
+                <h2 class="section-title">Detalle por Producto de Captación</h2>
+                <p class="seccion-subtitulo" id="depositos-prod-sub">Saldos y crecimiento mensual en el período seleccionado</p>
+                <div class="depositos-tabla-wrap">
+                    <table class="depositos-tabla" id="depositos-tabla"></table>
+                </div>
             </div>
         </div>
         
@@ -5909,7 +6565,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>Volver al menú principal</span>
                 </button>
-                <h1 style="color: #6d28d9;">Módulo Patrimonio</h1>
+                <h1 style="color: #3C2367;">Módulo Patrimonio</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
             
@@ -5930,6 +6586,58 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
+                
+                <!-- SOLVENCIA (trasladada desde el menú principal) -->
+                <div class="modulo-card modulo-evolucion-patrimonio" onclick="abrirSolvencia()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/>
+                            <polyline points="9 12 11 14 15 10"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Solvencia</h3>
+                    <p class="modulo-descripcion">Patrimonio técnico, APR, límites operativos y fondo de liquidez.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- QUEBRANTO PATRIMONIAL (Patrimonio 3 / Capital Social 31) -->
+                <div class="modulo-card modulo-evolucion-patrimonio" onclick="abrirQuebranto()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2v20"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Quebranto Patrimonial</h3>
+                    <p class="modulo-descripcion">Relación entre el Patrimonio (cuenta 3) y el Capital Social (cuenta 31).</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- CAPITAL INSTITUCIONAL ((32+33+34) / Activo 1) -->
+                <div class="modulo-card modulo-evolucion-patrimonio" onclick="abrirCapitalInstitucional()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 21h18"/>
+                            <path d="M5 21V8l7-5 7 5v13"/>
+                            <path d="M9 21v-6h6v6"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Capital Institucional</h3>
+                    <p class="modulo-descripcion">Capital institucional (cuentas 32+33+34) sobre el Activo total (cuenta 1).</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
             </div>
         </div>
         
@@ -5940,7 +6648,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>Volver al menú principal</span>
                 </button>
-                <h1 style="color: #c2410c;">Módulo Ingresos, Costos y Gastos</h1>
+                <h1 style="color: #11782C;">Módulo Ingresos, Costos y Gastos</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
             
@@ -5981,6 +6689,23 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
+                
+                <!-- SUFICIENCIA DEL MARGEN FINANCIERO -->
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirSuficiencia()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2v20"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Suficiencia del Margen Financiero</h3>
+                    <p class="modulo-descripcion">Margen Financiero Bruto (41−61) sobre los gastos operativos netos (5105+5110+5115+5125−4225).</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
             </div>
         </div>
         
@@ -5992,7 +6717,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
                         <span>Volver al módulo Ingresos, Costos y Gastos</span>
                     </button>
-                    <h1 class="header-title-text" style="color:#c2410c;">Evolución de Ingresos, Costos y Gastos</h1>
+                    <h1 class="header-title-text" style="color:#11782C;">Evolución de Ingresos, Costos y Gastos</h1>
                     <div class="subtitle">Cuentas 4 (Ingresos), 6 (Costos), 5−53 (Gastos) y 53 (Excedente)</div>
                 </div>
                 <div class="header-acciones">
@@ -6099,15 +6824,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <p class="seccion-subtitulo">Cuentas de 2 dígitos de Ingresos, Costos y Gastos</p>
                 <div class="icg-subcuentas-cols">
                     <div class="icg-subcuentas-col">
-                        <h3 class="icg-col-titulo" style="color:#B8923C;">Ingresos (4)</h3>
+                        <h3 class="icg-col-titulo" style="color:#11782C;">Ingresos (4)</h3>
                         <div id="icg-subc-ingresos" class="evolucion-subcuentas-grid icg-grid-col"></div>
                     </div>
                     <div class="icg-subcuentas-col">
-                        <h3 class="icg-col-titulo" style="color:#3F7878;">Costos (6)</h3>
+                        <h3 class="icg-col-titulo" style="color:#17A53D;">Costos (6)</h3>
                         <div id="icg-subc-costos" class="evolucion-subcuentas-grid icg-grid-col"></div>
                     </div>
                     <div class="icg-subcuentas-col">
-                        <h3 class="icg-col-titulo" style="color:#5A8B6E;">Gastos (5)</h3>
+                        <h3 class="icg-col-titulo" style="color:#11782C;">Gastos (5)</h3>
                         <div id="icg-subc-gastos" class="evolucion-subcuentas-grid icg-grid-col"></div>
                     </div>
                 </div>
@@ -6188,7 +6913,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
                         <span>Volver al módulo Ingresos, Costos y Gastos</span>
                     </button>
-                    <h1 style="color: #3D2259;">Indicadores de Rentabilidad</h1>
+                    <h1 style="color: #3C2367;">Indicadores de Rentabilidad</h1>
                     <div class="subtitle">ROE · Margen Neto · ROIC — Valores YTD anualizados según el período seleccionado</div>
                 </div>
                 <div class="header-acciones">
@@ -6249,14 +6974,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
                 <!-- Tabla resumen ROE -->
                 <div class="rent-comp-card rent-comp-card-full">
-                    <div class="rent-comp-titulo" style="color:#3D2259;">Composición del período seleccionado</div>
+                    <div class="rent-comp-titulo" style="color:#3C2367;">Composición del período seleccionado</div>
                     <div class="rent-comp-formula">(1 + (Excedente / (Patrimonio<sub>prom</sub> × n)))<sup>n</sup> − 1</div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rent-comp-roe-exc">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio total actual (Cta 3)</span><span class="rent-comp-row-valor" id="rent-comp-roe-patr-act">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio mismo mes año ant.</span><span class="rent-comp-row-valor" id="rent-comp-roe-patr-ant">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio promedio</span><span class="rent-comp-row-valor" id="rent-comp-roe-patr-prom">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Mes del año (n)</span><span class="rent-comp-row-valor" id="rent-comp-roe-n">—</span></div>
-                    <div class="rent-comp-row rent-comp-row-final" style="color:#3D2259;"><span class="rent-comp-row-label">ROE anualizado</span><span class="rent-comp-row-valor" id="rent-comp-roe-final">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#3C2367;"><span class="rent-comp-row-label">ROE anualizado</span><span class="rent-comp-row-valor" id="rent-comp-roe-final">—</span></div>
                 </div>
             </div>
             
@@ -6277,13 +7002,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
                 <!-- Tabla resumen Margen Neto -->
                 <div class="rent-comp-card rent-comp-card-full">
-                    <div class="rent-comp-titulo" style="color:#634782;">Composición del período seleccionado</div>
+                    <div class="rent-comp-titulo" style="color:#6039A3;">Composición del período seleccionado</div>
                     <div class="rent-comp-formula">Excedente / (Cta 41 + Cta 4225)</div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rent-comp-mn-exc">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Ingresos por ventas (Cta 41)</span><span class="rent-comp-row-valor" id="rent-comp-mn-41">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Recuperaciones (Cta 4225)</span><span class="rent-comp-row-valor" id="rent-comp-mn-4225">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Suma denominador</span><span class="rent-comp-row-valor" id="rent-comp-mn-denom">—</span></div>
-                    <div class="rent-comp-row rent-comp-row-final" style="color:#634782;"><span class="rent-comp-row-label">Margen Neto</span><span class="rent-comp-row-valor" id="rent-comp-mn-final">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#6039A3;"><span class="rent-comp-row-label">Margen Neto</span><span class="rent-comp-row-valor" id="rent-comp-mn-final">—</span></div>
                 </div>
             </div>
             
@@ -6304,7 +7029,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
                 <!-- Tabla resumen ROIC -->
                 <div class="rent-comp-card rent-comp-card-full">
-                    <div class="rent-comp-titulo" style="color:#937BAB;">Composición del período seleccionado</div>
+                    <div class="rent-comp-titulo" style="color:#9B86C0;">Composición del período seleccionado</div>
                     <div class="rent-comp-formula">(1 + (Excedente / (Capital invertido<sub>prom</sub> × n)))<sup>n</sup> − 1<br><span style="color:#9ca3af;">Capital = Prom. depósitos + Prom. obligaciones + Prom. patrimonio</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rent-comp-roic-exc">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Prom. depósitos (Cta 21)</span><span class="rent-comp-row-valor" id="rent-comp-roic-prom-dep">—</span></div>
@@ -6312,7 +7037,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Prom. patrimonio (Cta 3)</span><span class="rent-comp-row-valor" id="rent-comp-roic-prom-patr">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Capital invertido (suma)</span><span class="rent-comp-row-valor" id="rent-comp-roic-denom">—</span></div>
                     <div class="rent-comp-row"><span class="rent-comp-row-label">Mes del año (n)</span><span class="rent-comp-row-valor" id="rent-comp-roic-n">—</span></div>
-                    <div class="rent-comp-row rent-comp-row-final" style="color:#937BAB;"><span class="rent-comp-row-label">ROIC anualizado</span><span class="rent-comp-row-valor" id="rent-comp-roic-final">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#9B86C0;"><span class="rent-comp-row-label">ROIC anualizado</span><span class="rent-comp-row-valor" id="rent-comp-roic-final">—</span></div>
                 </div>
             </div>
         </div>
@@ -6432,14 +7157,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- COMPOSICIÓN DEL CÁLCULO (Numerador vs Denominador) -->
-            <div class="section seccion-composicion" style="--comp-color: #dc2626;">
+            <div class="section seccion-composicion" style="--comp-color: #C91A15;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
                     <span class="composicion-fmla">Mora Total / Cartera Total = Índice de Mora</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#dc2626;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#C91A15;"></span>
                         Mora Total (B+C+D+E)
                     </span>
                     <span class="composicion-leyenda-item">
@@ -6595,14 +7320,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- COMPOSICIÓN DEL CÁLCULO -->
-            <div class="section seccion-composicion" style="--comp-color: #1e40af;">
+            <div class="section seccion-composicion" style="--comp-color: #045988;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
                     <span class="composicion-fmla">Cartera (B+C+D+E) / Cartera Total = Calidad de Cartera</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#1e40af;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#045988;"></span>
                         Cartera B+C+D+E
                     </span>
                     <span class="composicion-leyenda-item">
@@ -6773,18 +7498,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- COMPOSICIÓN DEL CÁLCULO -->
-            <div class="section seccion-composicion" style="--comp-color: #14b8a6;">
+            <div class="section seccion-composicion" style="--comp-color: #36BAA8;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
                     <span class="composicion-fmla">Deterioro / Cartera Vencida = Cobertura</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#0d9488;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#2A9488;"></span>
                         Deterioro Total
                     </span>
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#5eead4;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#ABDED7;"></span>
                         Cartera Vencida (B+C+D+E)
                     </span>
                 </div>
@@ -6924,18 +7649,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- COMPOSICIÓN DEL CÁLCULO -->
-            <div class="section seccion-composicion" style="--comp-color: #6366f1;">
+            <div class="section seccion-composicion" style="--comp-color: #088DD5;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
                     <span class="composicion-fmla">(Cartera Actual / Cartera Año Anterior) − 1 = Crecimiento</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#6366f1;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#088DD5;"></span>
                         Cartera Período Actual
                     </span>
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#a5b4fc;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#89CAED;"></span>
                         Cartera Año Anterior
                     </span>
                 </div>
@@ -6968,7 +7693,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
                         <span>Volver al módulo Activo</span>
                     </button>
-                    <h1 class="header-title-text" style="color:#0e7490;">Evolución del Activo</h1>
+                    <h1 class="header-title-text" style="color:#237C70;">Evolución del Activo</h1>
                     <div class="subtitle">Cuenta 1 · Saldo total y composición por subcuentas</div>
                 </div>
                 <div class="header-acciones">
@@ -7044,7 +7769,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
                         <span>Volver al módulo Pasivo</span>
                     </button>
-                    <h1 class="header-title-text" style="color:#b45309;">Evolución del Pasivo</h1>
+                    <h1 class="header-title-text" style="color:#045988;">Evolución del Pasivo</h1>
                     <div class="subtitle">Cuenta 2 · Saldo total y composición por subcuentas</div>
                 </div>
                 <div class="header-acciones">
@@ -7117,7 +7842,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
                         <span>Volver al módulo Patrimonio</span>
                     </button>
-                    <h1 class="header-title-text" style="color:#6d28d9;">Evolución del Patrimonio</h1>
+                    <h1 class="header-title-text" style="color:#3C2367;">Evolución del Patrimonio</h1>
                     <div class="subtitle">Cuenta 3 · Saldo total y composición por subcuentas</div>
                 </div>
                 <div class="header-acciones">
@@ -7182,6 +7907,256 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
         </div>
         
+        <!-- ========== MÓDULO: QUEBRANTO PATRIMONIAL (Patrimonio 3 / Capital 31) ========== -->
+        <div class="container oculto" id="quebranto-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-patrimonio" onclick="volverAlSubmenuPatrimonio()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Patrimonio</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#3C2367;">Quebranto Patrimonial</h1>
+                    <div class="subtitle">Patrimonio (cuenta 3) sobre Capital Social (cuenta 31)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card">
+                            <label for="quebranto-filtro-anio">Año</label>
+                            <select id="quebranto-filtro-anio"></select>
+                        </div>
+                        <div class="filtro-card">
+                            <label for="quebranto-filtro-mes">Mes</label>
+                            <select id="quebranto-filtro-mes"></select>
+                        </div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-quebranto" onclick="descargarExcelQuebranto()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-patrimonio evo-kpi-principal">
+                    <div class="evo-kpi-label">Quebranto Patrimonial</div>
+                    <div class="evo-kpi-valor" id="quebranto-valor">—</div>
+                    <div class="evo-kpi-sub" id="quebranto-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Patrimonio (cuenta 3)</div>
+                    <div class="evo-kpi-valor" id="quebranto-patrimonio">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Capital Social (cuenta 31)</div>
+                    <div class="evo-kpi-valor" id="quebranto-capital">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="quebranto-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="quebranto-var-mes-sub">—</div>
+                </div>
+            </div>
+            
+            <div class="section acc-graficos seccion-evolucion-patrimonio-neon">
+                <h2 class="section-title">Evolución Histórica del Quebranto Patrimonial</h2>
+                <p class="seccion-subtitulo">Patrimonio ÷ Capital Social · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo">
+                        <div id="chartQuebranto-axis-container" class="eje-y-html-container"></div>
+                    </div>
+                    <div class="chart-scroll-container chart-scroll-evolucion-patrimonio" id="quebranto-scroll-container">
+                        <div class="chart-inner" id="quebranto-inner">
+                            <canvas id="chartQuebranto"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle por Período</h2>
+                <p class="seccion-subtitulo">Patrimonio, Capital Social y quebranto resultante en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="quebranto-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="quebranto-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+        <!-- ========== MÓDULO: SUFICIENCIA DEL MARGEN FINANCIERO ========== -->
+        <div class="container oculto" id="suficiencia-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">Suficiencia del Margen Financiero</h1>
+                    <div class="subtitle">Margen Financiero Bruto (41 − 61) sobre gastos operativos netos (5105 + 5110 + 5115 + 5125 − 4225)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card">
+                            <label for="suficiencia-filtro-anio">Año</label>
+                            <select id="suficiencia-filtro-anio"></select>
+                        </div>
+                        <div class="filtro-card">
+                            <label for="suficiencia-filtro-mes">Mes</label>
+                            <select id="suficiencia-filtro-mes"></select>
+                        </div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-suficiencia" onclick="descargarExcelSuficiencia()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">Suficiencia del Margen Financiero</div>
+                    <div class="evo-kpi-valor" id="suficiencia-valor">—</div>
+                    <div class="evo-kpi-sub" id="suficiencia-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Margen Financiero Bruto (41 − 61)</div>
+                    <div class="evo-kpi-valor" id="suficiencia-mfb">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Gastos Operativos Netos</div>
+                    <div class="evo-kpi-valor" id="suficiencia-gastos">—</div>
+                    <div class="evo-kpi-sub">5105+5110+5115+5125−4225</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="suficiencia-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="suficiencia-var-mes-sub">—</div>
+                </div>
+            </div>
+            
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica de la Suficiencia del Margen Financiero</h2>
+                <p class="seccion-subtitulo">Margen Financiero Bruto ÷ Gastos Operativos Netos · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo">
+                        <div id="chartSuficiencia-axis-container" class="eje-y-html-container"></div>
+                    </div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="suficiencia-scroll-container">
+                        <div class="chart-inner" id="suficiencia-inner">
+                            <canvas id="chartSuficiencia"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle del Cálculo por Período</h2>
+                <p class="seccion-subtitulo">Componentes de la fórmula y suficiencia resultante en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="suficiencia-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="suficiencia-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== MÓDULO: CAPITAL INSTITUCIONAL ((32+33+34) / Activo 1) ========== -->
+        <div class="container oculto" id="capital-inst-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-patrimonio" onclick="volverAlSubmenuPatrimonio()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Patrimonio</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#3C2367;">Capital Institucional</h1>
+                    <div class="subtitle">Capital institucional (cuentas 32+33+34) sobre el Activo total (cuenta 1)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card">
+                            <label for="capital-inst-filtro-anio">Año</label>
+                            <select id="capital-inst-filtro-anio"></select>
+                        </div>
+                        <div class="filtro-card">
+                            <label for="capital-inst-filtro-mes">Mes</label>
+                            <select id="capital-inst-filtro-mes"></select>
+                        </div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-capital-inst" onclick="descargarExcelCapitalInst()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-patrimonio evo-kpi-principal">
+                    <div class="evo-kpi-label">Capital Institucional / Activo</div>
+                    <div class="evo-kpi-valor" id="capital-inst-valor">—</div>
+                    <div class="evo-kpi-sub" id="capital-inst-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Capital Institucional (32+33+34)</div>
+                    <div class="evo-kpi-valor" id="capital-inst-capital">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Activo (cuenta 1)</div>
+                    <div class="evo-kpi-valor" id="capital-inst-activo">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-patrimonio">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="capital-inst-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="capital-inst-var-mes-sub">—</div>
+                </div>
+            </div>
+            
+            <div class="section acc-graficos seccion-evolucion-patrimonio-neon">
+                <h2 class="section-title">Evolución Histórica del Capital Institucional</h2>
+                <p class="seccion-subtitulo">(Cuentas 32+33+34) ÷ Activo · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo">
+                        <div id="chartCapitalInst-axis-container" class="eje-y-html-container"></div>
+                    </div>
+                    <div class="chart-scroll-container chart-scroll-evolucion-patrimonio" id="capital-inst-scroll-container">
+                        <div class="chart-inner" id="capital-inst-inner">
+                            <canvas id="chartCapitalInst"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle por Período</h2>
+                <p class="seccion-subtitulo">Componentes del capital institucional, activo total y ratio resultante en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="capital-inst-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="capital-inst-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== MODAL GRÁFICO HISTÓRICO POR MODALIDAD ========== -->
         <div class="historico-overlay" id="historico-overlay" onclick="cerrarHistoricoModalidad(event)">
             <div class="historico-card" id="historico-card" onclick="event.stopPropagation()">
@@ -7506,18 +8481,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
             
             <!-- COMPOSICIÓN DEL CÁLCULO -->
-            <div class="section seccion-composicion" style="--comp-color: #15803d;">
+            <div class="section seccion-composicion" style="--comp-color: #17A53D;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
                     <span class="composicion-fmla">Patrimonio Técnico / APR = Solvencia</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#15803d;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#17A53D;"></span>
                         Patrimonio Técnico
                     </span>
                     <span class="composicion-leyenda-item">
-                        <span class="composicion-leyenda-sq" style="background:#86efac;"></span>
+                        <span class="composicion-leyenda-sq" style="background:#ADE6BC;"></span>
                         Activos Ponderados por Riesgo (APR)
                     </span>
                 </div>
@@ -7525,7 +8500,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <div class="composicion-eje-fijo">
                         <div id="chartSolvenciaCompAxis-container" class="eje-y-html-container"></div>
                     </div>
-                    <div class="composicion-scroll-wrap" id="solvencia-comp-scroll" style="scrollbar-color: #15803d #f0fdf4;">
+                    <div class="composicion-scroll-wrap" id="solvencia-comp-scroll" style="scrollbar-color: #17A53D #E8F6EC;">
                         <div class="composicion-scroll-inner" id="solvencia-comp-inner">
                             <canvas id="chartSolvenciaComp"></canvas>
                         </div>
@@ -7649,7 +8624,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 // Recalcular pointRadius/pointBackgroundColor según idx actual
                 const idxActual = obtenerIdxActualCobertura();
                 chartCobertura.data.datasets[0].pointBackgroundColor = serie.map((v, i) =>
-                    i === idxActual ? '#115e59' : '#0d9488'
+                    i === idxActual ? '#1E6B61' : '#2A9488'
                 );
                 chartCobertura.data.datasets[0].pointRadius = serie.map((_, i) =>
                     i === idxActual ? 8 : 4.5
@@ -7685,6 +8660,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const SERIE_ICG_COSTOS    = DATOS_ICG.map(r => r.costos);
         const SERIE_ICG_GASTOS    = DATOS_ICG.map(r => r.gastos_sin_excedente);
         const SERIE_ICG_EXCEDENTE = DATOS_ICG.map(r => r.excedente);
+        
+        // ===== DATOS DE CRECIMIENTO DE DEPÓSITOS =====
+        const DATOS_DEPOSITOS = {json.dumps(depositos_json, default=_json_default, ensure_ascii=False)};
+        const SERIE_DEP_TOTAL   = DATOS_DEPOSITOS.map(r => r.total_depositos);
+        const SERIE_DEP_CAPITAL = DATOS_DEPOSITOS.map(r => r.total_capital);
         
         // ===== SERIES DE COMPOSICIÓN (Numerador / Denominador) =====
         const SERIE_SOLVENCIA_NUM = {json.dumps(serie_solvencia_num, default=_json_default)};
@@ -7741,6 +8721,98 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             Chart.defaults.transitions.update.animation = {{ duration: 650, easing: 'easeInOutCubic' }};
         }}
         
+        // =====================================================================
+        // SISTEMA DE COLOR MONOCROMÁTICO (paleta "Monochromatic Colour Palette")
+        // ---------------------------------------------------------------------
+        // Cada familia tiene una rampa shade -> base -> mid -> tint -> soft.
+        // Hex extraídos de la imagen de paleta. Se usan en todo el modelo para
+        // dar coherencia visual: un color ancla por módulo + degradados sobrios.
+        // =====================================================================
+        const PALETA = {{
+            reds:          {{ shade:'#A0100B', base:'#EA1912', mid:'#EA544F', tint:'#EEA9A6', soft:'#F6DDDC' }},
+            oranges:       {{ shade:'#A75A00', base:'#F78502', mid:'#F6A141', tint:'#F4CC9E', soft:'#F8E9D7' }},
+            yellows:       {{ shade:'#AC9500', base:'#FBDA03', mid:'#F5DE46', tint:'#F4E9A3', soft:'#F8F5DC' }},
+            yellow_greens: {{ shade:'#678A27', base:'#95C63D', mid:'#AED070', tint:'#D4E3B9', soft:'#EFF4E6' }},
+            greens:        {{ shade:'#0C5E22', base:'#17A53D', mid:'#26D354', tint:'#77DE93', soft:'#ADE6BC' }},
+            blue_greens:   {{ shade:'#237C70', base:'#36BAA8', mid:'#62CBBD', tint:'#ABDED7', soft:'#D8EEEB' }},
+            blues:         {{ shade:'#045988', base:'#088DD5', mid:'#2CAAEE', tint:'#89CAED', soft:'#C1E1F2' }},
+            blue_violets:  {{ shade:'#33417C', base:'#4D61B4', mid:'#7B89C3', tint:'#BDC3DD', soft:'#E6E8F1' }},
+            violets:       {{ shade:'#3C2367', base:'#6039A3', mid:'#7F5ABF', tint:'#B4A0D5', soft:'#D6CCE6' }},
+            mauves:        {{ shade:'#7A3E7D', base:'#AB5EAE', mid:'#BE89C0', tint:'#DDC7DE', soft:'#F4EEF4' }},
+            mauve_pinks:   {{ shade:'#952568', base:'#CD3F94', mid:'#D574AE', tint:'#E7BED7', soft:'#F7EBF2' }},
+            pinks:         {{ shade:'#CC0F66', base:'#EF3E8F', mid:'#EF7CB0', tint:'#F6D0E1', soft:'#FBE9F2' }},
+        }};
+        // Asignación de familia ancla por módulo (arco frío + un cálido para resultados)
+        const MODULO_COLOR = {{
+            solvencia:   PALETA.greens,
+            activo:      PALETA.blue_greens,
+            pasivo:      PALETA.blues,
+            patrimonio:  PALETA.violets,
+            ingresos:    PALETA.greens,
+            portada:     PALETA.mauves,
+        }};
+        
+        // Convierte '#RRGGBB' a 'rgba(r,g,b,a)'
+        function hexToRgba(hex, alpha) {{
+            const h = hex.replace('#','');
+            const r = parseInt(h.substring(0,2),16);
+            const g = parseInt(h.substring(2,4),16);
+            const b = parseInt(h.substring(4,6),16);
+            return `rgba(${{r}},${{g}},${{b}},${{alpha === undefined ? 1 : alpha}})`;
+        }}
+        
+        // Crea un degradado vertical de relleno para gráficos de línea (estilo Solvencia,
+        // pero "real": color arriba -> transparente abajo). Devuelve un CanvasGradient o,
+        // si el área aún no está disponible, un color rgba de respaldo.
+        // Uso recomendado: pasar backgroundColor como función (ctx) => gradienteArea(ctx, color)
+        function gradienteArea(context, hexColor, opts) {{
+            opts = opts || {{}};
+            const topAlpha = opts.topAlpha === undefined ? 0.34 : opts.topAlpha;
+            const midAlpha = opts.midAlpha === undefined ? 0.12 : opts.midAlpha;
+            const botAlpha = opts.botAlpha === undefined ? 0.02 : opts.botAlpha;
+            const chart = context.chart;
+            const {{ ctx, chartArea }} = chart;
+            if (!chartArea) return hexToRgba(hexColor, midAlpha);
+            const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            g.addColorStop(0,    hexToRgba(hexColor, topAlpha));
+            g.addColorStop(0.55, hexToRgba(hexColor, midAlpha));
+            g.addColorStop(1,    hexToRgba(hexColor, botAlpha));
+            return g;
+        }}
+        
+        // -----------------------------------------------------------------
+        // Estilo de etiquetas (datalabels) "cajita blanca" idéntico al de
+        // Solvencia, reutilizable en todos los gráficos de línea+área.
+        //   formatter : función (valor) => texto a mostrar
+        //   borderColor / color : color del borde de la cajita y del texto
+        //   soloIdx   : si se pasa un índice, SOLO ese punto muestra etiqueta
+        //               (para gráficos de millones donde mostrar todas satura)
+        // -----------------------------------------------------------------
+        function dataLabelsCajita(formatter, opts) {{
+            opts = opts || {{}};
+            const borderColor = opts.borderColor || 'rgba(71,85,105,0.18)';
+            const color = opts.color || '#1c2520';
+            const soloIdx = (opts.soloIdx === undefined) ? null : opts.soloIdx;
+            return {{
+                display: (ctx) => {{
+                    if (soloIdx === null) return true;          // todas
+                    return ctx.dataIndex === soloIdx;            // solo el punto pedido
+                }},
+                align: 'top',
+                anchor: 'center',
+                offset: 12,
+                clamp: true,
+                backgroundColor: 'rgba(255,255,255,0.98)',
+                borderRadius: 10,
+                borderColor: borderColor,
+                borderWidth: 1,
+                padding: {{ top: 4, bottom: 4, left: 9, right: 9 }},
+                color: color,
+                font: {{ family: "'JetBrains Mono', monospace", size: 10, weight: '700' }},
+                formatter: formatter
+            }};
+        }}
+        
         // Helpers
         // Formato europeo: miles con punto, decimales con coma (de-DE)
         const fmtMillones = (v) => new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}).format(v);
@@ -7767,10 +8839,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         function colorZona(pct) {{
-            if (pct < 9) return '#dc2626';
-            if (pct < 15) return '#eab308';
-            if (pct < 25) return '#22c55e';
-            return '#15803d';
+            if (pct < 9) return PALETA.reds.base;       // peligro
+            if (pct < 15) return PALETA.yellows.base;   // advertencia
+            if (pct < 25) return PALETA.greens.mid;     // bien
+            return PALETA.greens.base;                  // óptimo
         }}
         
         function actualizarGauge(r) {{
@@ -7888,12 +8960,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         {{
                             label: 'Solvencia',
                             data: SERIE_SOLVENCIA,
-                            borderColor: '#15803d',
-                            backgroundColor: 'rgba(21,128,61,0.10)',
+                            borderColor: PALETA.greens.base,
+                            backgroundColor: (c) => gradienteArea(c, PALETA.greens.base),
                             borderWidth: 2.5,
                             tension: 0.3,
                             fill: true,
-                            pointBackgroundColor: SERIE_SOLVENCIA.map((v, i) => i === idxActual ? '#dc2626' : colorZona(v)),
+                            pointBackgroundColor: SERIE_SOLVENCIA.map((v, i) => i === idxActual ? PALETA.reds.base : colorZona(v)),
                             pointBorderColor: '#ffffff',
                             pointBorderWidth: 2,
                             pointRadius: SERIE_SOLVENCIA.map((_, i) => i === idxActual ? 7 : 4),
@@ -7961,9 +9033,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             // Sincronizar eje Y HTML para Solvencia
-            sincronizarEjeYHistorico(SERIE_SOLVENCIA, 'chartSolvencia-axis-container', {{
+            aplicarEjeAlChart(chartSolvencia, sincronizarEjeYHistorico(SERIE_SOLVENCIA, 'chartSolvencia-axis-container', {{
                 tituloEje: 'Solvencia (%)'
-            }});
+            }}));
             
             // ===== GRÁFICO LIQUIDEZ =====
             chartLiquidez = new Chart(document.getElementById('chartLiquidez'), {{
@@ -7974,7 +9046,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         label: 'Fondo Liquidez',
                         data: SERIE_LIQUIDEZ,
                         backgroundColor: SERIE_LIQUIDEZ.map((v, i) => {{
-                            if (i === idxActual) return v >= 10 ? '#15803d' : '#dc2626';
+                            if (i === idxActual) return v >= 10 ? '#17A53D' : '#C91A15';
                             return v >= 10 ? 'rgba(21,128,61,0.65)' : 'rgba(220,38,38,0.65)';
                         }}),
                         borderColor: SERIE_LIQUIDEZ.map((v, i) => i === idxActual ? '#1c2520' : 'transparent'),
@@ -8043,12 +9115,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function actualizarGraficos(idxActual) {{
             if (!chartSolvencia || !chartLiquidez) return;
             
-            chartSolvencia.data.datasets[0].pointBackgroundColor = SERIE_SOLVENCIA.map((v, i) => i === idxActual ? '#dc2626' : colorZona(v));
+            chartSolvencia.data.datasets[0].pointBackgroundColor = SERIE_SOLVENCIA.map((v, i) => i === idxActual ? '#C91A15' : colorZona(v));
             chartSolvencia.data.datasets[0].pointRadius = SERIE_SOLVENCIA.map((_, i) => i === idxActual ? 7 : 4);
             chartSolvencia.update('active');
             
             chartLiquidez.data.datasets[0].backgroundColor = SERIE_LIQUIDEZ.map((v, i) => {{
-                if (i === idxActual) return v >= 10 ? '#15803d' : '#dc2626';
+                if (i === idxActual) return v >= 10 ? '#17A53D' : '#C91A15';
                 return v >= 10 ? 'rgba(21,128,61,0.65)' : 'rgba(220,38,38,0.65)';
             }});
             chartLiquidez.data.datasets[0].borderColor = SERIE_LIQUIDEZ.map((v, i) => i === idxActual ? '#1c2520' : 'transparent');
@@ -10420,32 +11492,32 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             activo: {{
                 titulo: 'Módulo Activo',
                 descripcion: 'Análisis detallado de la composición del activo, evolución por cuenta y participación en el balance. Te lo traemos muy pronto.',
-                color: '#06b6d4',
-                colorDeep: '#0e7490',
+                color: '#36BAA8',
+                colorDeep: '#237C70',
                 colorSoft: 'rgba(6,182,212,0.12)',
                 icono: 'circle-percent'
             }},
             pasivo: {{
                 titulo: 'Módulo Pasivo',
                 descripcion: 'Análisis de obligaciones financieras, depósitos, créditos externos y composición de la deuda. Te lo traemos muy pronto.',
-                color: '#ec4899',
-                colorDeep: '#9d174d',
+                color: '#CD3F94',
+                colorDeep: '#7A1F4F',
                 colorSoft: 'rgba(236,72,153,0.12)',
                 icono: 'card'
             }},
             patrimonio: {{
                 titulo: 'Módulo Patrimonio',
                 descripcion: 'Aportes sociales, reservas, fondos patrimoniales y evolución del patrimonio neto. Te lo traemos muy pronto.',
-                color: '#8b5cf6',
-                colorDeep: '#5b21b6',
+                color: '#6039A3',
+                colorDeep: '#3C2367',
                 colorSoft: 'rgba(139,92,246,0.12)',
                 icono: 'building'
             }},
             ingresos: {{
                 titulo: 'Ingresos, Costos y Gastos',
                 descripcion: 'Estado de resultados, márgenes operativos, eficiencia y análisis de rentabilidad. Te lo traemos muy pronto.',
-                color: '#f59e0b',
-                colorDeep: '#b45309',
+                color: '#F78502',
+                colorDeep: '#A75A00',
                 colorSoft: 'rgba(245,158,11,0.12)',
                 icono: 'chart-up'
             }}
@@ -10463,13 +11535,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             'dashboard-root',
             'mora-root', 'riesgo-root', 'cobertura-root', 'crecimiento-root',
             'evolucion-activo-root', 'evolucion-pasivo-root', 'evolucion-patrimonio-root',
-            'evolucion-icg-root', 'rentabilidad-root'
+            'evolucion-icg-root', 'rentabilidad-root', 'depositos-root',
+            'quebranto-root', 'capital-inst-root', 'suficiencia-root'
         ];
         function ocultarTodosLosModulos() {{
             TODOS_LOS_MODULOS.forEach(id => {{
                 const el = document.getElementById(id);
                 if (el) el.classList.add('oculto');
             }});
+            // Al abrir cualquier módulo, ya no estamos en el inicio → mostrar botón 🏠
+            document.body.classList.remove('en-inicio');
         }}
         
         function abrirSolvencia() {{
@@ -10493,8 +11568,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         function volverAlMenu() {{
+            // Solvencia ahora pertenece al módulo Patrimonio
             ocultarTodosLosModulos();
-            document.getElementById('menu-principal').classList.remove('oculto');
+            document.getElementById('submenu-patrimonio').classList.remove('oculto');
             window.scrollTo({{ top: 0, behavior: 'instant' }});
         }}
         
@@ -10526,6 +11602,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function volverAlMenuPrincipal() {{
             ocultarTodosLosModulos();
             document.getElementById('menu-principal').classList.remove('oculto');
+            document.body.classList.add('en-inicio');
             window.scrollTo({{ top: 0, behavior: 'instant' }});
         }}
         
@@ -10550,7 +11627,842 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             document.getElementById('submenu-ingresos').classList.remove('oculto');
             window.scrollTo({{ top: 0, behavior: 'instant' }});
         }}
+
+        // ==========================================================
+        // ===== MÓDULOS: QUEBRANTO PATRIMONIAL Y CAPITAL INSTITUCIONAL =====
+        // ==========================================================
+        // Series base (alineadas con DATOS_EVOLUCION_PATRIMONIO / _ACTIVO).
+        // Quebranto = Patrimonio(3) / Capital Social(31)  -> en %
+        // Capital Institucional = (32+33+34) / Activo(1)  -> en %
+        const QPAT_STATE = {{ inic: false, chart: null, idx: 0 }};
+        const CINST_STATE = {{ inic: false, chart: null, idx: 0 }};
+
+        function _subSaldo(reg, codigo) {{
+            const s = (reg.subcuentas || []).find(x => x.codigo === codigo);
+            return s ? (s.saldo || 0) : 0;
+        }}
+
+        // Construye los datos del módulo Quebranto a partir de la evolución del patrimonio
+        function _datosQuebranto() {{
+            return DATOS_EVOLUCION_PATRIMONIO.map(r => {{
+                const patrimonio = r.saldo_actual || 0;
+                const capital = _subSaldo(r, '31');
+                const ratio = capital > 0 ? (patrimonio / capital) * 100 : null; // en %
+                return {{ anio: r.anio, mes: r.mes, periodo: r.periodo, patrimonio, capital, ratio }};
+            }});
+        }}
+
+        // Construye los datos del módulo Capital Institucional
+        // Activo total tomado de DATOS_EVOLUCION_ACTIVO (mismo orden de períodos)
+        function _datosCapitalInst() {{
+            return DATOS_EVOLUCION_PATRIMONIO.map((r, i) => {{
+                const cap32 = _subSaldo(r, '32');
+                const cap33 = _subSaldo(r, '33');
+                const cap34 = _subSaldo(r, '34');
+                const capInst = cap32 + cap33 + cap34;
+                const regAct = DATOS_EVOLUCION_ACTIVO[i];
+                const activo = regAct ? (regAct.saldo_actual || 0) : 0;
+                const ratio = activo > 0 ? (capInst / activo) * 100 : null; // en %
+                return {{ anio: r.anio, mes: r.mes, periodo: r.periodo, cap32, cap33, cap34, capInst, activo, ratio }};
+            }});
+        }}
+
+        const DATOS_QUEBRANTO = _datosQuebranto();
+        const DATOS_CAPITAL_INST = _datosCapitalInst();
+
+        // Formato porcentaje sin multiplicar (el valor ya viene en %)
+        const fmtPctDirecto = (v, dec = 2) => (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(dec).replace('.', ',') + '%';
+        const fmtMillEnt = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}).format(v);
+
+        function _badgeVarPct(actual, anterior) {{
+            if (actual === null || anterior === null || anterior === undefined || actual === undefined || isNaN(actual) || isNaN(anterior)) {{
+                return '<span class="dep-crec igual">—</span>';
+            }}
+            const delta = actual - anterior; // en puntos porcentuales
+            if (Math.abs(delta) < 0.005) return '<span class="dep-crec igual">▬ 0,00 pts</span>';
+            const sube = delta > 0;
+            const cls = sube ? 'sube' : 'baja';
+            const fl = sube ? '▲' : '▼';
+            return `<span class="dep-crec ${{cls}}">${{fl}} ${{(sube ? '+' : '')}}${{delta.toFixed(2).replace('.', ',')}} pts</span>`;
+        }}
+
+        // ---- Helper genérico para poblar filtros año/mes de estos módulos ----
+        function _poblarFiltrosModulo(datos, idAnio, idMes, onChange) {{
+            const anios = [...new Set(datos.map(r => r.anio))].sort();
+            const selAnio = document.getElementById(idAnio);
+            selAnio.innerHTML = anios.map(a => `<option value="${{a}}">${{a}}</option>`).join('');
+            selAnio.value = datos[datos.length - 1].anio;
+            function poblarMeses() {{
+                const anioSel = parseInt(selAnio.value);
+                const meses = datos.filter(r => r.anio === anioSel).map(r => r.mes);
+                const selMes = document.getElementById(idMes);
+                selMes.innerHTML = meses.map(m => `<option value="${{m}}">${{MESES_NOMBRE[m] || m}}</option>`).join('');
+                selMes.value = meses[meses.length - 1];
+            }}
+            poblarMeses();
+            selAnio.onchange = () => {{ poblarMeses(); onChange(); }};
+            document.getElementById(idMes).onchange = onChange;
+        }}
+
+        // ---- Gráfico de línea con área degradada (mismo estilo Solvencia) ----
+        function _crearGraficoRatio(canvasId, axisId, serie, etiquetas, etiquetasLargas, color, idxActual) {{
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return null;
+            const maxSerie = Math.max(...serie.filter(v => v !== null && !isNaN(v)), 0);
+            const ejeInfo = sincronizarEjeYHistorico(serie, axisId, {{
+                tituloEje: '%', formatter: (v) => v.toFixed(0).replace('.', ',') + '%'
+            }});
+            const niceMin = ejeInfo.niceMin, niceMax = ejeInfo.niceMax;
+            return new Chart(ctx, {{
+                type: 'line',
+                data: {{
+                    labels: etiquetas,
+                    datasets: [{{
+                        label: 'Ratio',
+                        data: serie,
+                        borderColor: color,
+                        backgroundColor: (c) => gradienteArea(c, color),
+                        borderWidth: 2.8,
+                        tension: 0.3,
+                        fill: true,
+                        pointBackgroundColor: serie.map((_, i) => i === idxActual ? '#C91A15' : color),
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: serie.map((_, i) => i === idxActual ? 7 : 4),
+                        pointHoverRadius: 9
+                    }}]
+                }},
+                options: {{
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: {{ mode: 'index', intersect: false }},
+                    layout: {{ padding: {{ top: 28, bottom: 4 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            backgroundColor: '#1c2520', padding: 11, cornerRadius: 8,
+                            titleColor: '#fff', bodyColor: '#fff',
+                            callbacks: {{
+                                title: (items) => items && items[0] ? etiquetasLargas[items[0].dataIndex] : '',
+                                label: (c) => '  ' + fmtPctDirecto(c.parsed.y)
+                            }}
+                        }},
+                        datalabels: dataLabelsCajita(
+                            (v) => v !== null ? fmtPctDirecto(v) : '',
+                            {{ borderColor: color + '55', color: '#1c2520' }}
+                        )
+                    }},
+                    scales: {{
+                        y: {{ beginAtZero: false, display: false, min: niceMin, max: niceMax }},
+                        x: {{ offset: true, grid: {{ display: false }}, ticks: {{ maxRotation: 0, minRotation: 0, font: {{ size: 10, weight: '500' }}, color: '#475569' }} }}
+                    }}
+                }}
+            }});
+        }}
+
+        function _ajustarAnchoRatio(innerId, scrollId, n) {{
+            const inner = document.getElementById(innerId);
+            const scroll = document.getElementById(scrollId);
+            if (!inner || !scroll) return;
+            let visible = scroll.clientWidth; if (visible < 100) visible = 900;
+            const porMes = Math.max(56, visible / 12);
+            inner.style.width = Math.max(visible, n * porMes) + 'px';
+        }}
+        function _scrollRatio(scrollId, innerId, idx, n) {{
+            const scroll = document.getElementById(scrollId), inner = document.getElementById(innerId);
+            if (!scroll || !inner) return;
+            const ratio = idx / Math.max(1, n - 1);
+            scroll.scrollTo({{ left: Math.max(0, ratio * inner.scrollWidth - scroll.clientWidth / 2), behavior: 'smooth' }});
+        }}
+
+        // =================== QUEBRANTO PATRIMONIAL ===================
+        function abrirQuebranto() {{
+            ocultarTodosLosModulos();
+            document.getElementById('quebranto-root').classList.remove('oculto');
+            if (!QPAT_STATE.inic) {{
+                QPAT_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_QUEBRANTO, 'quebranto-filtro-anio', 'quebranto-filtro-mes', aplicarFiltroQuebranto);
+                QPAT_STATE.idx = DATOS_QUEBRANTO.length - 1;
+                renderQuebranto();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('quebranto-inner', 'quebranto-scroll-container', DATOS_QUEBRANTO.length); if (QPAT_STATE.chart) QPAT_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroQuebranto() {{
+            const anio = parseInt(document.getElementById('quebranto-filtro-anio').value);
+            const mes = document.getElementById('quebranto-filtro-mes').value;
+            const idx = DATOS_QUEBRANTO.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ QPAT_STATE.idx = idx; renderQuebranto(); }}
+        }}
+        function renderQuebranto() {{
+            const datos = DATOS_QUEBRANTO, idx = QPAT_STATE.idx, r = datos[idx];
+            const COLOR = '#6039A3';
+            const serie = datos.map(d => d.ratio);
+            const etiquetas = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etiquetasLargas = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+
+            document.getElementById('quebranto-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('quebranto-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('quebranto-patrimonio').textContent = fmtMillEnt(r.patrimonio);
+            document.getElementById('quebranto-capital').textContent = fmtMillEnt(r.capital);
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('quebranto-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('quebranto-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+
+            _ajustarAnchoRatio('quebranto-inner', 'quebranto-scroll-container', datos.length);
+            if (QPAT_STATE.chart) {{ QPAT_STATE.chart.destroy(); }}
+            QPAT_STATE.chart = _crearGraficoRatio('chartQuebranto', 'chartQuebranto-axis-container', serie, etiquetas, etiquetasLargas, COLOR, idx);
+            setTimeout(() => _scrollRatio('quebranto-scroll-container', 'quebranto-inner', idx, datos.length), 100);
+
+            // Tabla de detalle
+            let html = '<thead><tr><th>Período</th><th style="text-align:right;">Patrimonio (3)</th><th style="text-align:right;">Capital Social (31)</th><th style="text-align:right;">Quebranto</th></tr></thead><tbody>';
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#EEE8F4;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.patrimonio)}}</td><td style="text-align:right;">${{fmtMillEnt(d.capital)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('quebranto-tabla').innerHTML = html;
+        }}
+
+        // =================== CAPITAL INSTITUCIONAL ===================
+        function abrirCapitalInstitucional() {{
+            ocultarTodosLosModulos();
+            document.getElementById('capital-inst-root').classList.remove('oculto');
+            if (!CINST_STATE.inic) {{
+                CINST_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_CAPITAL_INST, 'capital-inst-filtro-anio', 'capital-inst-filtro-mes', aplicarFiltroCapitalInst);
+                CINST_STATE.idx = DATOS_CAPITAL_INST.length - 1;
+                renderCapitalInst();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('capital-inst-inner', 'capital-inst-scroll-container', DATOS_CAPITAL_INST.length); if (CINST_STATE.chart) CINST_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroCapitalInst() {{
+            const anio = parseInt(document.getElementById('capital-inst-filtro-anio').value);
+            const mes = document.getElementById('capital-inst-filtro-mes').value;
+            const idx = DATOS_CAPITAL_INST.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ CINST_STATE.idx = idx; renderCapitalInst(); }}
+        }}
+        function renderCapitalInst() {{
+            const datos = DATOS_CAPITAL_INST, idx = CINST_STATE.idx, r = datos[idx];
+            const COLOR = '#4D61B4';
+            const serie = datos.map(d => d.ratio);
+            const etiquetas = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etiquetasLargas = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+
+            document.getElementById('capital-inst-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('capital-inst-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('capital-inst-capital').textContent = fmtMillEnt(r.capInst);
+            document.getElementById('capital-inst-activo').textContent = fmtMillEnt(r.activo);
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('capital-inst-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('capital-inst-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+
+            _ajustarAnchoRatio('capital-inst-inner', 'capital-inst-scroll-container', datos.length);
+            if (CINST_STATE.chart) {{ CINST_STATE.chart.destroy(); }}
+            CINST_STATE.chart = _crearGraficoRatio('chartCapitalInst', 'chartCapitalInst-axis-container', serie, etiquetas, etiquetasLargas, COLOR, idx);
+            setTimeout(() => _scrollRatio('capital-inst-scroll-container', 'capital-inst-inner', idx, datos.length), 100);
+
+            // Tabla de detalle
+            let html = '<thead><tr><th>Período</th><th style="text-align:right;">Cta 32</th><th style="text-align:right;">Cta 33</th><th style="text-align:right;">Cta 34</th><th style="text-align:right;">Cap. Inst.</th><th style="text-align:right;">Activo (1)</th><th style="text-align:right;">Ratio</th></tr></thead><tbody>';
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E8EBF5;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.cap32)}}</td><td style="text-align:right;">${{fmtMillEnt(d.cap33)}}</td><td style="text-align:right;">${{fmtMillEnt(d.cap34)}}</td><td style="text-align:right;">${{fmtMillEnt(d.capInst)}}</td><td style="text-align:right;">${{fmtMillEnt(d.activo)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('capital-inst-tabla').innerHTML = html;
+        }}
+
+        // ---- Excel auditable para ambos módulos ----
+        async function descargarExcelQuebranto() {{
+            const datos = DATOS_QUEBRANTO;
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Quebranto Patrimonial');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Patrimonio (3)', key: 'pat', width: 18 }},
+                {{ header: 'Capital Social (31)', key: 'cap', width: 20 }},
+                {{ header: 'Quebranto (3/31) %', key: 'q', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF6039A3' }} }};
+            datos.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, pat: d.patrimonio, cap: d.capital }});
+                const rn = i + 2;
+                row.getCell('pat').numFmt = '#,##0';
+                row.getCell('cap').numFmt = '#,##0';
+                row.getCell('q').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
+                row.getCell('q').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Quebranto_Patrimonial.xlsx');
+        }}
+        async function descargarExcelCapitalInst() {{
+            const datos = DATOS_CAPITAL_INST;
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Capital Institucional');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Cta 32', key: 'c32', width: 14 }},
+                {{ header: 'Cta 33', key: 'c33', width: 14 }},
+                {{ header: 'Cta 34', key: 'c34', width: 14 }},
+                {{ header: 'Capital Institucional', key: 'ci', width: 20 }},
+                {{ header: 'Activo (1)', key: 'act', width: 16 }},
+                {{ header: 'Cap. Inst. / Activo %', key: 'r', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF4D61B4' }} }};
+            datos.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, c32: d.cap32, c33: d.cap33, c34: d.cap34, act: d.activo }});
+                const rn = i + 2;
+                ['c32','c33','c34','act'].forEach(k => row.getCell(k).numFmt = '#,##0');
+                row.getCell('ci').value = {{ formula: `B${{rn}}+C${{rn}}+D${{rn}}` }};
+                row.getCell('ci').numFmt = '#,##0';
+                row.getCell('r').value = {{ formula: `IF(F${{rn}}=0,"",E${{rn}}/F${{rn}})` }};
+                row.getCell('r').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Capital_Institucional.xlsx');
+        }}
+
+        // ==========================================================
+        // ===== MÓDULO: SUFICIENCIA DEL MARGEN FINANCIERO =====
+        // ==========================================================
+        // Margen Financiero Bruto = cuenta 41 - cuenta 61
+        // Gastos Operativos Netos = 5105 + 5110 + 5115 + 5125 - 4225
+        // Suficiencia = MFB / Gastos Operativos Netos  (expresado en %)
+        const SMF_STATE = {{ inic: false, chart: null, idx: 0 }};
+
+        function _datosSuficiencia() {{
+            return DATOS_ICG.map(r => {{
+                const mfb = (r.smf_41 || 0) - (r.smf_61 || 0);
+                const gastosNetos = (r.smf_5105 || 0) + (r.smf_5110 || 0) + (r.smf_5115 || 0) + (r.smf_5125 || 0) - (r.smf_4225 || 0);
+                const ratio = gastosNetos !== 0 ? (mfb / gastosNetos) * 100 : null; // en %
+                return {{
+                    anio: r.anio, mes: r.mes, periodo: r.periodo,
+                    c41: r.smf_41 || 0, c61: r.smf_61 || 0,
+                    c5105: r.smf_5105 || 0, c5110: r.smf_5110 || 0,
+                    c5115: r.smf_5115 || 0, c5125: r.smf_5125 || 0, c4225: r.smf_4225 || 0,
+                    mfb, gastosNetos, ratio
+                }};
+            }});
+        }}
+        const DATOS_SUFICIENCIA = _datosSuficiencia();
+
+        function abrirSuficiencia() {{
+            ocultarTodosLosModulos();
+            document.getElementById('suficiencia-root').classList.remove('oculto');
+            if (!SMF_STATE.inic) {{
+                SMF_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_SUFICIENCIA, 'suficiencia-filtro-anio', 'suficiencia-filtro-mes', aplicarFiltroSuficiencia);
+                SMF_STATE.idx = DATOS_SUFICIENCIA.length - 1;
+                renderSuficiencia();
+            }} else {{
+                requestAnimationFrame(() => {{
+                    _ajustarAnchoRatio('suficiencia-inner', 'suficiencia-scroll-container', DATOS_SUFICIENCIA.length);
+                    if (SMF_STATE.chart) SMF_STATE.chart.resize();
+                }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroSuficiencia() {{
+            const anio = parseInt(document.getElementById('suficiencia-filtro-anio').value);
+            const mes = document.getElementById('suficiencia-filtro-mes').value;
+            const idx = DATOS_SUFICIENCIA.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ SMF_STATE.idx = idx; renderSuficiencia(); }}
+        }}
+        function renderSuficiencia() {{
+            const datos = DATOS_SUFICIENCIA, idx = SMF_STATE.idx, r = datos[idx];
+            const COLOR = '#1FA64A';  // verde del módulo Ingresos
+            const serie = datos.map(d => d.ratio);
+            const etiquetas = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etiquetasLargas = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+
+            document.getElementById('suficiencia-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('suficiencia-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('suficiencia-mfb').textContent = fmtMillEnt(r.mfb);
+            document.getElementById('suficiencia-gastos').textContent = fmtMillEnt(r.gastosNetos);
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('suficiencia-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('suficiencia-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+
+            _ajustarAnchoRatio('suficiencia-inner', 'suficiencia-scroll-container', datos.length);
+            if (SMF_STATE.chart) {{ SMF_STATE.chart.destroy(); }}
+            SMF_STATE.chart = _crearGraficoRatio('chartSuficiencia', 'chartSuficiencia-axis-container', serie, etiquetas, etiquetasLargas, COLOR, idx);
+            setTimeout(() => _scrollRatio('suficiencia-scroll-container', 'suficiencia-inner', idx, datos.length), 100);
+
+            // Tabla de detalle
+            let html = '<thead><tr><th>Período</th><th style="text-align:right;">Ing. 41</th><th style="text-align:right;">Costo 61</th><th style="text-align:right;">M.F. Bruto</th><th style="text-align:right;">Gastos Netos</th><th style="text-align:right;">Suficiencia</th></tr></thead><tbody>';
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E3F4E8;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.c41)}}</td><td style="text-align:right;">${{fmtMillEnt(d.c61)}}</td><td style="text-align:right;">${{fmtMillEnt(d.mfb)}}</td><td style="text-align:right;">${{fmtMillEnt(d.gastosNetos)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('suficiencia-tabla').innerHTML = html;
+        }}
+
+        async function descargarExcelSuficiencia() {{
+            const datos = DATOS_SUFICIENCIA;
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Suficiencia Margen Fin.');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Ingresos (41)', key: 'c41', width: 16 }},
+                {{ header: 'Costos (61)', key: 'c61', width: 16 }},
+                {{ header: 'Gasto 5105', key: 'g1', width: 14 }},
+                {{ header: 'Gasto 5110', key: 'g2', width: 14 }},
+                {{ header: 'Gasto 5115', key: 'g3', width: 14 }},
+                {{ header: 'Gasto 5125', key: 'g4', width: 14 }},
+                {{ header: 'Recup. 4225', key: 'r4', width: 14 }},
+                {{ header: 'Margen Fin. Bruto', key: 'mfb', width: 18 }},
+                {{ header: 'Gastos Op. Netos', key: 'gn', width: 18 }},
+                {{ header: 'Suficiencia (MFB/Gastos)', key: 'suf', width: 22 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF1FA64A' }} }};
+            datos.forEach((d, i) => {{
+                const row = ws.addRow({{
+                    p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`,
+                    c41: d.c41, c61: d.c61, g1: d.c5105, g2: d.c5110, g3: d.c5115, g4: d.c5125, r4: d.c4225
+                }});
+                const rn = i + 2;
+                ['c41','c61','g1','g2','g3','g4','r4'].forEach(k => row.getCell(k).numFmt = '#,##0.00');
+                // Margen Financiero Bruto = 41 - 61
+                row.getCell('mfb').value = {{ formula: `B${{rn}}-C${{rn}}` }};
+                row.getCell('mfb').numFmt = '#,##0.00';
+                // Gastos Operativos Netos = 5105+5110+5115+5125-4225
+                row.getCell('gn').value = {{ formula: `D${{rn}}+E${{rn}}+F${{rn}}+G${{rn}}-H${{rn}}` }};
+                row.getCell('gn').numFmt = '#,##0.00';
+                // Suficiencia = MFB / Gastos Netos
+                row.getCell('suf').value = {{ formula: `IF(J${{rn}}=0,"",I${{rn}}/J${{rn}})` }};
+                row.getCell('suf').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Suficiencia_Margen_Financiero.xlsx');
+        }}
+
+
         
+        
+        // ============================================================
+        // ========== SUBMODULO: CRECIMIENTO DE DEPOSITOS ==========
+        // ============================================================
+        const DEPOSITOS_STATE = {{ inicializado: false, charts: {{}}, chartTotal: null, idxActual: 0, modo: 'total' }};
+        // Colores en gama AZUL (módulo Pasivo), un tono por producto.
+        const DEP_COLORS = {{
+            ahorro_vista: '#2CAAEE',   // azul claro
+            cdat:         '#088DD5',   // azul base
+            contractual:  '#0670A8',  // azul medio
+            daes:         '#045988',  // azul oscuro
+        }};
+        // Color ancla del total del módulo Pasivo/Depósitos
+        const DEP_COLOR_TOTAL = '#088DD5'; // azul base
+        
+        function depSaldoProducto(prod, modo) {{
+            return modo === 'capital' ? prod.saldo_capital : prod.saldo_total;
+        }}
+        function depSerieProducto(id, modo) {{
+            return DATOS_DEPOSITOS.map(r => {{
+                const p = r.productos.find(x => x.id === id);
+                return p ? depSaldoProducto(p, modo) : 0;
+            }});
+        }}
+        function depSerieTotal(modo) {{
+            return DATOS_DEPOSITOS.map(r => modo === 'capital' ? r.total_capital : r.total_depositos);
+        }}
+        function depCrecimientoMensual(serie) {{
+            return serie.map((v, i) => {{
+                if (i === 0) return null;
+                const ant = serie[i-1];
+                if (!ant || ant === 0) return null;
+                return ((v / ant) - 1) * 100;
+            }});
+        }}
+        
+        function abrirCrecimientoDepositos() {{
+            ocultarTodosLosModulos();
+            document.getElementById('depositos-root').classList.remove('oculto');
+            if (!DEPOSITOS_STATE.inicializado) {{
+                DEPOSITOS_STATE.inicializado = true;
+                inicializarDashboardDepositos();
+            }} else {{
+                requestAnimationFrame(() => {{
+                    ajustarAnchoCanvasDepositos();
+                    if (DEPOSITOS_STATE.chartTotal) DEPOSITOS_STATE.chartTotal.resize();
+                    Object.values(DEPOSITOS_STATE.charts).forEach(c => c && c.resize());
+                }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        
+        function inicializarDashboardDepositos() {{
+            const anios = [...new Set(DATOS_DEPOSITOS.map(r => r.anio))].sort();
+            const selAnio = document.getElementById('depositos-filtro-anio');
+            selAnio.innerHTML = anios.map(a => `<option value="${{a}}">${{a}}</option>`).join('');
+            selAnio.value = DATOS_DEPOSITOS[DATOS_DEPOSITOS.length - 1].anio;
+            
+            function poblarMeses() {{
+                const anioSel = parseInt(selAnio.value);
+                const meses = DATOS_DEPOSITOS.filter(r => r.anio === anioSel).map(r => r.mes);
+                const selMes = document.getElementById('depositos-filtro-mes');
+                selMes.innerHTML = meses.map(m => `<option value="${{m}}">${{MESES_NOMBRE[m] || m}}</option>`).join('');
+                selMes.value = meses[meses.length - 1];
+            }}
+            poblarMeses();
+            selAnio.onchange = () => {{ poblarMeses(); aplicarFiltroDepositos(); }};
+            document.getElementById('depositos-filtro-mes').onchange = aplicarFiltroDepositos;
+            
+            DEPOSITOS_STATE.idxActual = DATOS_DEPOSITOS.length - 1;
+            inicializarGraficoDepositos();
+            renderPeriodoDepositos(DEPOSITOS_STATE.idxActual);
+        }}
+        
+        function aplicarFiltroDepositos() {{
+            const anio = parseInt(document.getElementById('depositos-filtro-anio').value);
+            const mes = document.getElementById('depositos-filtro-mes').value;
+            const idx = DATOS_DEPOSITOS.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{
+                DEPOSITOS_STATE.idxActual = idx;
+                renderPeriodoDepositos(idx);
+                // Redibuja para resaltar el punto activo y reposiciona el scroll
+                inicializarGraficoDepositos();
+                scrollAlPeriodoDepositos(idx);
+            }}
+        }}
+        
+        function cambiarModoDepositos(modo) {{
+            if (modo === DEPOSITOS_STATE.modo) return;
+            DEPOSITOS_STATE.modo = modo;
+            document.querySelectorAll('#depositos-toggle .cobertura-toggle-btn').forEach(b => {{
+                b.classList.toggle('activo', b.dataset.modo === modo);
+            }});
+            document.getElementById('depositos-graf-sub').textContent =
+                (modo === 'capital' ? 'Saldo capital' : 'Saldo total') + ' de captaciones por producto - Millones COP';
+            inicializarGraficoDepositos();
+            renderPeriodoDepositos(DEPOSITOS_STATE.idxActual);
+        }}
+        
+        const fmtDepMill = (v) => (v === null || v === undefined) ? '—' :
+            new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}).format(v);
+        const fmtDepMillEs = (v) => {{
+            if (v === null || v === undefined) return '';
+            if (v === 0) return '0';
+            return new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}).format(v);
+        }};
+        
+        function badgeCrecDep(v) {{
+            if (v === null || v === undefined) return '<span class="dep-crec igual">—</span>';
+            if (Math.abs(v) < 0.005) return '<span class="dep-crec igual">▬ 0,00%</span>';
+            const sube = v > 0;
+            const cls = sube ? 'sube' : 'baja';
+            const fl = sube ? '▲' : '▼';
+            return `<span class="dep-crec ${{cls}}">${{fl}} ${{(sube?'+':'')}}${{v.toFixed(2).replace('.',',')}}%</span>`;
+        }}
+        
+        function renderPeriodoDepositos(idx) {{
+            const r = DATOS_DEPOSITOS[idx];
+            if (!r) return;
+            const modo = DEPOSITOS_STATE.modo;
+            
+            const totalSerie = depSerieTotal(modo);
+            const crecTotalSerie = depCrecimientoMensual(totalSerie);
+            const totalVal = modo === 'capital' ? r.total_capital : r.total_depositos;
+            const crecTotal = crecTotalSerie[idx];
+            
+            // Convierte un hex en componentes rgb para fondos translúcidos
+            function _hexRgbDep(hex) {{
+                const h = hex.replace('#','');
+                return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
+            }}
+            
+            const [tr, tg, tb] = _hexRgbDep(DEP_COLOR_TOTAL);
+            let kpisHtml = `
+                <div class="dep-total-card dep-total-card--principal" style="--c:${{DEP_COLOR_TOTAL}}; --c-rgb:${{tr}},${{tg}},${{tb}};">
+                    <div class="dep-total-card-top">
+                        <span class="dep-total-card-dot"></span>
+                        <span class="dep-total-card-label">Total Depósitos</span>
+                    </div>
+                    <div class="dep-total-card-valor">${{fmtDepMill(totalVal)}}</div>
+                    <div class="dep-total-card-foot">${{badgeCrecDep(crecTotal)}} <span class="dep-total-card-ref">vs mes anterior</span></div>
+                </div>`;
+            r.productos.forEach(p => {{
+                const serie = depSerieProducto(p.id, modo);
+                const crecSerie = depCrecimientoMensual(serie);
+                const val = depSaldoProducto(p, modo);
+                const color = DEP_COLORS[p.id] || '#64748b';
+                const [pr, pg, pb] = _hexRgbDep(color);
+                kpisHtml += `
+                    <div class="dep-total-card" style="--c:${{color}}; --c-rgb:${{pr}},${{pg}},${{pb}};">
+                        <div class="dep-total-card-top">
+                            <span class="dep-total-card-dot"></span>
+                            <span class="dep-total-card-label">${{p.nombre}}</span>
+                        </div>
+                        <div class="dep-total-card-valor">${{fmtDepMill(val)}}</div>
+                        <div class="dep-total-card-foot">${{badgeCrecDep(crecSerie[idx])}} <span class="dep-total-card-ref">vs mes anterior</span></div>
+                    </div>`;
+            }});
+            document.getElementById('depositos-kpis').innerHTML = kpisHtml;
+            
+            document.getElementById('depositos-prod-sub').textContent =
+                `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}} - ${{modo === 'capital' ? 'Saldo capital' : 'Saldo total'}} - Crecimiento mensual`;
+            
+            const labelSaldo = modo === 'capital' ? 'Saldo Capital' : 'Saldo Total';
+            let thtml = `<thead><tr>
+                <th>Producto</th>
+                <th>${{labelSaldo}} (M COP)</th>
+                <th>Crecimiento mensual</th>
+                <th>Participacion</th>
+            </tr></thead><tbody>`;
+            
+            r.productos.forEach(p => {{
+                const serie = depSerieProducto(p.id, modo);
+                const crecSerie = depCrecimientoMensual(serie);
+                const val = depSaldoProducto(p, modo);
+                const part = totalVal > 0 ? (val / totalVal * 100) : 0;
+                const color = DEP_COLORS[p.id] || '#64748b';
+                thtml += `<tr class="dep-producto-row">
+                    <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${{color}}"></span>${{p.nombre}}</span></td>
+                    <td>${{fmtDepMill(val)}}</td>
+                    <td>${{badgeCrecDep(crecSerie[idx])}}</td>
+                    <td>${{part.toFixed(1).replace('.',',')}}%</td>
+                </tr>`;
+                (p.discriminado || []).forEach(d => {{
+                    thtml += `<tr class="dep-disc-row">
+                        <td>${{d.nombre}}</td>
+                        <td>${{fmtDepMill(d.saldo)}}</td>
+                        <td></td>
+                        <td></td>
+                    </tr>`;
+                }});
+            }});
+            thtml += `<tr class="dep-total-row">
+                <td>TOTAL DEPOSITOS</td>
+                <td>${{fmtDepMill(totalVal)}}</td>
+                <td>${{badgeCrecDep(crecTotal)}}</td>
+                <td>100,0%</td>
+            </tr>`;
+            thtml += '</tbody>';
+            document.getElementById('depositos-tabla').innerHTML = thtml;
+        }}
+        
+        // ---------------------------------------------------------------
+        // Gráficos de línea con área degradada (estilo Solvencia) para el
+        // módulo Crecimiento de Depósitos: 1 total grande + cuadrícula 2x2.
+        // ---------------------------------------------------------------
+        const DEP_PRODUCTOS = [
+            {{ id: 'ahorro_vista', label: 'Ahorro a la Vista' }},
+            {{ id: 'cdat',         label: 'CDAT' }},
+            {{ id: 'contractual',  label: 'Ahorro Contractual' }},
+            {{ id: 'daes',         label: 'DAES' }},
+        ];
+
+        // Crea (o recrea) un gráfico de línea con relleno degradado vertical.
+        // canvasId: id del <canvas>; serie: array de valores; color: hex base;
+        // axisContainerId: contenedor del eje Y HTML; etiquetasLargas: tooltips.
+        function crearGraficoLineaDep(canvasId, serie, color, axisContainerId, etiquetas, etiquetasLargas, store, key) {{
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+            if (store[key]) {{ store[key].destroy(); store[key] = null; }}
+
+            const idxActual = DEPOSITOS_STATE.idxActual;
+            const maxSerie = Math.max(...serie.filter(v => v !== null && !isNaN(v)), 0);
+            const ejeInfo = sincronizarEjeYHistorico(serie, axisContainerId, {{
+                tituloEje: 'Millones COP', formatter: fmtDepMillEs
+            }});
+            const niceMin = ejeInfo.niceMin, niceMax = ejeInfo.niceMax;
+
+            store[key] = new Chart(ctx, {{
+                type: 'line',
+                data: {{
+                    labels: etiquetas,
+                    datasets: [{{
+                        label: 'Saldo',
+                        data: serie,
+                        borderColor: color,
+                        backgroundColor: (c) => gradienteArea(c, color),
+                        borderWidth: 2.5,
+                        tension: 0.3,
+                        fill: true,
+                        pointBackgroundColor: serie.map((_, i) => i === idxActual ? '#C91A15' : color),
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: serie.map((_, i) => i === idxActual ? 7 : 4),
+                        pointHoverRadius: 9
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {{ mode: 'index', intersect: false }},
+                    layout: {{ padding: {{ top: 28, bottom: 4 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            backgroundColor: '#1c2520', padding: 11, cornerRadius: 8,
+                            titleColor: '#fff', bodyColor: '#fff',
+                            titleFont: {{ family: "'Poppins', sans-serif", weight: '600' }},
+                            bodyFont: {{ family: "'Poppins', sans-serif" }},
+                            callbacks: {{
+                                title: (items) => items && items[0] ? etiquetasLargas[items[0].dataIndex] : '',
+                                label: (c) => `  ${{fmtDepMill(c.parsed.y)}} M COP`
+                            }}
+                        }},
+                        datalabels: dataLabelsCajita(
+                            (v) => v !== null ? fmtDepMill(v) : '',
+                            {{ borderColor: color + '55', color: '#1c2520', soloIdx: idxActual }}
+                        )
+                    }},
+                    scales: {{
+                        y: {{ beginAtZero: false, display: false, min: niceMin, max: niceMax, grace: '0%' }},
+                        x: {{
+                            offset: true,
+                            grid: {{ display: false }},
+                            ticks: {{ maxRotation: 0, minRotation: 0, font: {{ size: 10, weight: '500' }}, color: '#475569' }}
+                        }}
+                    }},
+                    onClick: (evt, els) => {{ if (els.length > 0) {{
+                        DEPOSITOS_STATE.idxActual = els[0].index;
+                        renderPeriodoDepositos(els[0].index);
+                        inicializarGraficoDepositos();
+                        scrollAlPeriodoDepositos(els[0].index);
+                    }} }}
+                }}
+            }});
+        }}
+
+        function inicializarGraficoDepositos() {{
+            const modo = DEPOSITOS_STATE.modo;
+            const etiquetas = DATOS_DEPOSITOS.map(r => `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0,3)}}-${{String(r.anio).substring(2)}}`);
+            const etiquetasLargas = DATOS_DEPOSITOS.map(r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`);
+
+            ajustarAnchoCanvasDepositos();
+
+            // Gráfico TOTAL grande
+            const totalSerie = depSerieTotal(modo);
+            crearGraficoLineaDep('chartDepositosTotal', totalSerie, DEP_COLOR_TOTAL,
+                'chartDepositosTotal-axis-container', etiquetas, etiquetasLargas, DEPOSITOS_STATE.charts, 'total');
+            DEPOSITOS_STATE.chartTotal = DEPOSITOS_STATE.charts.total;
+
+            // 4 gráficos por producto (cuadrícula 2x2)
+            DEP_PRODUCTOS.forEach(prod => {{
+                const serie = depSerieProducto(prod.id, modo);
+                const color = DEP_COLORS[prod.id];
+                // pintar el punto de color del título de la mini-card
+                const punto = document.getElementById('dep-mini-punto-' + prod.id);
+                if (punto) punto.style.background = color;
+                crearGraficoLineaDep('chartDep-' + prod.id, serie, color,
+                    'chartDep-' + prod.id + '-axis-container', etiquetas, etiquetasLargas,
+                    DEPOSITOS_STATE.charts, prod.id);
+            }});
+
+            setTimeout(() => scrollAlPeriodoDepositos(DEPOSITOS_STATE.idxActual), 100);
+        }}
+
+        // IDs de todos los contenedores scroll/inner (total + 4 productos)
+        const DEP_SCROLL_IDS = [
+            {{ scroll: 'depositosTotal-scroll-container', inner: 'depositosTotal-inner' }},
+            {{ scroll: 'dep-ahorro_vista-scroll-container', inner: 'dep-ahorro_vista-inner' }},
+            {{ scroll: 'dep-cdat-scroll-container', inner: 'dep-cdat-inner' }},
+            {{ scroll: 'dep-contractual-scroll-container', inner: 'dep-contractual-inner' }},
+            {{ scroll: 'dep-daes-scroll-container', inner: 'dep-daes-inner' }},
+        ];
+
+        function ajustarAnchoCanvasDepositos() {{
+            DEP_SCROLL_IDS.forEach((ids, i) => {{
+                const inner = document.getElementById(ids.inner);
+                const scroll = document.getElementById(ids.scroll);
+                if (!inner || !scroll) return;
+                let anchoVisible = scroll.clientWidth;
+                if (anchoVisible < 100) anchoVisible = (i === 0 ? 900 : 420);
+                // El total muestra ~12 meses; los mini ~8 para que se lean bien
+                const VENTANA = (i === 0) ? 12 : 8;
+                const ANCHO_MIN = (i === 0) ? 56 : 46;
+                const anchoPorMes = Math.max(ANCHO_MIN, anchoVisible / VENTANA);
+                inner.style.width = Math.max(anchoVisible, DATOS_DEPOSITOS.length * anchoPorMes) + 'px';
+            }});
+        }}
+
+        function scrollAlPeriodoDepositos(idx) {{
+            const ratio = idx / Math.max(1, DATOS_DEPOSITOS.length - 1);
+            DEP_SCROLL_IDS.forEach(ids => {{
+                const scroll = document.getElementById(ids.scroll);
+                const inner = document.getElementById(ids.inner);
+                if (!scroll || !inner) return;
+                scroll.scrollTo({{ left: Math.max(0, ratio * inner.scrollWidth - scroll.clientWidth/2), behavior: 'smooth' }});
+            }});
+        }}
+        
+        async function descargarExcelDepositos() {{
+            const btn = document.getElementById('btn-excel-depositos');
+            const span = btn.querySelector('span');
+            const txt0 = span.textContent;
+            btn.disabled = true; span.textContent = 'Generando...';
+            try {{
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'Dashboard Cooperativo';
+                const modo = DEPOSITOS_STATE.modo;
+                const labelSaldo = modo === 'capital' ? 'Saldo Capital' : 'Saldo Total';
+                const ws = wb.addWorksheet('Resumen');
+                ws.columns = [
+                    {{ header: 'Periodo', width: 16 }},
+                    {{ header: 'Ahorro a la Vista', width: 18 }},
+                    {{ header: 'CDAT', width: 16 }},
+                    {{ header: 'Ahorro Contractual', width: 18 }},
+                    {{ header: 'DAES', width: 16 }},
+                    {{ header: 'Total Depositos', width: 18 }},
+                    {{ header: 'Crec. Mensual %', width: 16 }},
+                ];
+                DATOS_DEPOSITOS.forEach((r, i) => {{
+                    const get = (id) => {{ const p = r.productos.find(x => x.id === id); return p ? depSaldoProducto(p, modo) : 0; }};
+                    ws.addRow([
+                        `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`,
+                        get('ahorro_vista'), get('cdat'), get('contractual'), get('daes'),
+                        {{ formula: `B${{i+2}}+C${{i+2}}+D${{i+2}}+E${{i+2}}` }},
+                        i === 0 ? null : {{ formula: `IFERROR((F${{i+2}}/F${{i+1}}-1)*100,0)` }}
+                    ]);
+                }});
+                ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFB45309' }} }};
+                ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFFFF7ED' }} }};
+                [2,3,4,5,6].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+                ws.getColumn(7).numFmt = '0.00"%"';
+                ws.views = [{{ state: 'frozen', ySplit: 1 }}];
+                
+                const r = DATOS_DEPOSITOS[DEPOSITOS_STATE.idxActual];
+                const wsD = wb.addWorksheet('Detalle periodo');
+                wsD.columns = [{{ header: 'Producto / Subcuenta', width: 36 }}, {{ header: 'Cuenta', width: 14 }}, {{ header: labelSaldo, width: 18 }}];
+                const t = wsD.addRow([`Detalle ${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`, '', '']);
+                t.font = {{ bold: true, size: 13, color: {{ argb: 'FFB45309' }} }};
+                wsD.addRow([]);
+                const hdr = wsD.addRow(['Producto / Subcuenta', 'Cuenta', labelSaldo]);
+                hdr.font = {{ bold: true }};
+                hdr.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFFFF7ED' }} }};
+                r.productos.forEach(p => {{
+                    const pr = wsD.addRow([p.nombre, p.cuenta_total, depSaldoProducto(p, modo)]);
+                    pr.font = {{ bold: true }};
+                    (p.discriminado || []).forEach(d => {{
+                        wsD.addRow([`    ${{d.nombre}}`, d.codigo, d.saldo]);
+                    }});
+                }});
+                const totRow = wsD.addRow(['TOTAL DEPOSITOS', '', modo === 'capital' ? r.total_capital : r.total_depositos]);
+                totRow.font = {{ bold: true, color: {{ argb: 'FFB45309' }} }};
+                wsD.getColumn(3).numFmt = '#,##0.00';
+                
+                const buf = await wb.xlsx.writeBuffer();
+                const blob = new Blob([buf], {{ type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'Crecimiento_Depositos_Auditable.xlsx';
+                a.click(); URL.revokeObjectURL(url);
+                span.textContent = '\u2713 Descargado';
+                setTimeout(() => {{ span.textContent = txt0; btn.disabled = false; }}, 2000);
+            }} catch(e) {{
+                console.error('Error Excel depositos:', e);
+                span.textContent = 'Error'; setTimeout(() => {{ span.textContent = txt0; btn.disabled = false; }}, 2000);
+            }}
+        }}
+        
+
         // ===== Navegación al Dashboard de MORA =====
         let moraInicializado = false;
         let chartMora = null;
@@ -10587,8 +12499,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             activo: {{
                 datos: () => DATOS_EVOLUCION_ACTIVO,
                 serie: () => SERIE_EVOLUCION_ACTIVO,
-                color: '#06b6d4', deep: '#0e7490', soft: 'rgba(6,182,212,0.18)', light: 'rgba(6,182,212,0.10)',
-                colorVar: '#0e7490',
+                color: '#36BAA8', deep: '#237C70', soft: 'rgba(54,186,168,0.18)', light: 'rgba(54,186,168,0.10)',
+                colorVar: '#237C70',
                 nombre: 'Activo', cuentaPrincipal: '1',
                 rootId: 'evolucion-activo-root',
                 canvasId: 'chartEvolucionActivo',
@@ -10610,8 +12522,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             pasivo: {{
                 datos: () => DATOS_EVOLUCION_PASIVO,
                 serie: () => SERIE_EVOLUCION_PASIVO,
-                color: '#f59e0b', deep: '#b45309', soft: 'rgba(245,158,11,0.18)', light: 'rgba(245,158,11,0.10)',
-                colorVar: '#b45309',
+                color: '#088DD5', deep: '#045988', soft: 'rgba(8,141,213,0.18)', light: 'rgba(8,141,213,0.10)',
+                colorVar: '#045988',
                 nombre: 'Pasivo', cuentaPrincipal: '2',
                 rootId: 'evolucion-pasivo-root',
                 canvasId: 'chartEvolucionPasivo',
@@ -10633,8 +12545,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             patrimonio: {{
                 datos: () => DATOS_EVOLUCION_PATRIMONIO,
                 serie: () => SERIE_EVOLUCION_PATRIMONIO,
-                color: '#8b5cf6', deep: '#6d28d9', soft: 'rgba(139,92,246,0.18)', light: 'rgba(139,92,246,0.10)',
-                colorVar: '#6d28d9',
+                color: '#6039A3', deep: '#3C2367', soft: 'rgba(96,57,163,0.18)', light: 'rgba(96,57,163,0.10)',
+                colorVar: '#3C2367',
                 nombre: 'Patrimonio', cuentaPrincipal: '3',
                 rootId: 'evolucion-patrimonio-root',
                 canvasId: 'chartEvolucionPatrimonio',
@@ -10910,7 +12822,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         label: cfg.nombre,
                         data: serie,
                         borderColor: cfg.color,
-                        backgroundColor: cfg.soft,
+                        backgroundColor: (c) => gradienteArea(c, cfg.color),
                         borderWidth: 3,
                         tension: 0.3,
                         fill: true,
@@ -10940,15 +12852,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                 label: (ctx) => `  ${{cfg.nombre}}: ${{fmtFull(ctx.parsed.y)}} M COP`
                             }}
                         }},
-                        datalabels: {{
-                            display: (ctx) => ctx.dataIndex === state.idxActual,
-                            align: 'top', anchor: 'end', offset: 10,
-                            clamp: true, clip: false,
-                            backgroundColor: cfg.deep, borderRadius: 6,
-                            color: '#ffffff', font: {{ size: 11, weight: '700' }},
-                            padding: {{ top: 5, bottom: 5, left: 9, right: 9 }},
-                            formatter: (v) => v !== null ? fmtFull(v) : ''
-                        }}
+                        datalabels: dataLabelsCajita(
+                            (v) => v !== null ? fmtFull(v) : '',
+                            {{ borderColor: cfg.color + '55', color: cfg.deep, soloIdx: state.idxActual }}
+                        )
                     }},
                     scales: {{
                         y: {{
@@ -10974,10 +12881,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
             
             // Sincronizar eje Y HTML
-            sincronizarEjeYHistorico(serie, cfg.axisContainerId, {{
+            aplicarEjeAlChart(state.chart, sincronizarEjeYHistorico(serie, cfg.axisContainerId, {{
                 tituloEje: cfg.tituloEje,
                 formatter: fmtMillonesEs
-            }});
+            }}));
             
             // Auto-scroll inicial
             setTimeout(() => scrollAlPeriodoEvolucion(tipo, state.idxActual), 100);
@@ -11062,7 +12969,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const tendEl = document.getElementById('subcuenta-tend');
                 const signo = delta >= 0 ? '↑' : '↓';
                 tendEl.textContent = `${{signo}} ${{(pctDelta * 100 >= 0 ? '+' : '')}}${{(pctDelta * 100).toFixed(2).replace('.', ',')}}%`;
-                tendEl.style.color = delta >= 0 ? '#15803d' : '#dc2626';
+                tendEl.style.color = delta >= 0 ? '#17A53D' : '#C91A15';
             }} else {{
                 ['subcuenta-min','subcuenta-max','subcuenta-prom','subcuenta-tend'].forEach(id => {{
                     document.getElementById(id).textContent = '--';
@@ -11114,7 +13021,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     datasets: [{{
                         data: serie,
                         borderColor: cfg.color,
-                        backgroundColor: cfg.soft,
+                        backgroundColor: (c) => gradienteArea(c, cfg.color),
                         borderWidth: 3,
                         tension: 0.3,
                         fill: true,
@@ -11143,15 +13050,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                 label: (ctx) => `  Saldo: ${{fmtMillonesFull(ctx.parsed.y)}} M COP`
                             }}
                         }},
-                        datalabels: {{
-                            display: (ctx) => ctx.dataIndex === idxActual,
-                            align: 'top', anchor: 'end', offset: 10,
-                            clamp: true, clip: false,
-                            backgroundColor: cfg.deep, borderRadius: 6,
-                            color: '#ffffff', font: {{ size: 11, weight: '700' }},
-                            padding: {{ top: 5, bottom: 5, left: 9, right: 9 }},
-                            formatter: (v) => v !== null ? fmtMillonesFull(v) : ''
-                        }}
+                        datalabels: dataLabelsCajita(
+                            (v) => v !== null ? fmtMillonesFull(v) : '',
+                            {{ borderColor: cfg.color + '55', color: cfg.deep, soloIdx: idxActual }}
+                        )
                     }},
                     scales: {{
                         y: {{
@@ -11177,10 +13079,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     minimumFractionDigits: 0, maximumFractionDigits: 0
                 }}).format(v);
             }};
-            sincronizarEjeYHistorico(serie, 'chartSubcuenta-axis-container', {{
+            aplicarEjeAlChart(chartSubcuenta, sincronizarEjeYHistorico(serie, 'chartSubcuenta-axis-container', {{
                 tituloEje: 'Saldo (Millones COP)',
                 formatter: fmtMillonesEs
-            }});
+            }}));
             
             // Auto-scroll al período actual
             const ratio = idxActual / Math.max(1, serie.length - 1);
@@ -11507,24 +13409,23 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }};
         
         const ICG_COLORS = {{
-            // Paleta pastel suave
+            // Armonizado con la paleta monocromática (tonos suaves)
             ingresos: {{
-                bar: '#F5D77E', border: '#E5C166', soft: 'rgba(245,215,126,0.18)'
+                bar: '#77DE93', border: '#26D354', soft: 'rgba(38,211,84,0.18)'
             }},
             costos: {{
-                bar: '#6FA8A8', border: '#578F8F', soft: 'rgba(111,168,168,0.18)'
+                bar: '#5FBF7E', border: '#17A53D', soft: 'rgba(23,165,61,0.18)'
             }},
             gastos: {{
-                bar: '#A8D5BA', border: '#8AC0A2', soft: 'rgba(168,213,186,0.18)'
+                bar: '#3E9A5C', border: '#11782C', soft: 'rgba(17,120,44,0.18)'
             }},
-            // Excedente: línea negra, marcadores círculo blanco con borde negro
+            // Excedente: linea verde oscuro de la gama
             excedente: {{
-                line: '#1a1a1a',
-                pointFill: '#ffffff', pointBorder: '#1a1a1a',
-                pointFillActivo: '#1a1a1a', pointBorderActivo: '#ffffff',
-                soft: 'rgba(26,26,26,0.06)',
-                // color de relleno para el segmento "Excedente" en el donut de distribución
-                slice: '#2C3E50'
+                line: '#0C5E22',
+                pointFill: '#ffffff', pointBorder: '#0C5E22',
+                pointFillActivo: '#0C5E22', pointBorderActivo: '#ffffff',
+                soft: 'rgba(12,94,34,0.08)',
+                slice: '#0C5E22'
             }},
         }};
         
@@ -11705,7 +13606,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }};
             const colorVar = (v) => {{
                 if (v === null || v === undefined) return '#6b7280';
-                return v >= 0 ? '#15803d' : '#dc2626';
+                return v >= 0 ? '#17A53D' : '#C91A15';
             }};
             
             // KPIs
@@ -11755,9 +13656,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     cont.appendChild(card);
                 }});
             }};
-            renderCol('icg-subc-ingresos', r.subc_ingresos, 'ingresos', '#B8923C');
-            renderCol('icg-subc-costos',   r.subc_costos,   'costos',   '#3F7878');
-            renderCol('icg-subc-gastos',   r.subc_gastos,   'gastos',   '#5A8B6E');
+            renderCol('icg-subc-ingresos', r.subc_ingresos, 'ingresos', '#11782C');
+            renderCol('icg-subc-costos',   r.subc_costos,   'costos',   '#A75A00');
+            renderCol('icg-subc-gastos',   r.subc_gastos,   'gastos',   '#C91A15');
             
             // Actualizar los gráficos
             // 1. Gráfico anual: depende del idx (incluye o no el período actual)
@@ -12394,23 +14295,23 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const ICG_RUBRO_CFG = {{
             ingresos: {{
                 nombre: 'Ingresos',
-                color: '#E5C166', deep: '#B8923C',
+                color: '#26D354', deep: '#11782C',
                 soft: 'rgba(245,215,126,0.20)', light: 'rgba(245,215,126,0.10)',
-                colorVar: '#B8923C',
+                colorVar: '#11782C',
                 subcKey: 'subc_ingresos'
             }},
             costos: {{
                 nombre: 'Costos',
-                color: '#6FA8A8', deep: '#3F7878',
+                color: '#F6A141', deep: '#A75A00',
                 soft: 'rgba(111,168,168,0.20)', light: 'rgba(111,168,168,0.10)',
-                colorVar: '#3F7878',
+                colorVar: '#A75A00',
                 subcKey: 'subc_costos'
             }},
             gastos: {{
                 nombre: 'Gastos',
-                color: '#8AC0A2', deep: '#5A8B6E',
+                color: '#8AC0A2', deep: '#C91A15',
                 soft: 'rgba(168,213,186,0.22)', light: 'rgba(168,213,186,0.10)',
-                colorVar: '#5A8B6E',
+                colorVar: '#C91A15',
                 subcKey: 'subc_gastos'
             }}
         }};
@@ -12487,7 +14388,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const tendEl = document.getElementById('subcuenta-tend');
                 const signo = delta >= 0 ? '↑' : '↓';
                 tendEl.textContent = `${{signo}} ${{(pctDelta * 100 >= 0 ? '+' : '')}}${{(pctDelta * 100).toFixed(2).replace('.', ',')}}%`;
-                tendEl.style.color = delta >= 0 ? '#15803d' : '#dc2626';
+                tendEl.style.color = delta >= 0 ? '#17A53D' : '#C91A15';
             }} else {{
                 ['subcuenta-min','subcuenta-max','subcuenta-prom','subcuenta-tend'].forEach(id => {{
                     document.getElementById(id).textContent = '--';
@@ -13037,9 +14938,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         
         // Paleta morada (de la imagen): cada indicador con su tono
         const RENT_PALETTE = {{
-            roe:    {{ bar: '#634782', border: '#3D2259', soft: 'rgba(99,71,130,0.16)',  deep: '#3D2259', label: '#3D2259' }},
-            margen: {{ bar: '#937BAB', border: '#634782', soft: 'rgba(147,123,171,0.16)', deep: '#634782', label: '#634782' }},
-            roic:   {{ bar: '#DEBBFF', border: '#937BAB', soft: 'rgba(222,187,255,0.30)', deep: '#937BAB', label: '#634782' }}
+            roe:    {{ bar: '#6039A3', border: '#3C2367', soft: 'rgba(99,71,130,0.16)',  deep: '#3C2367', label: '#3C2367' }},
+            margen: {{ bar: '#9B86C0', border: '#6039A3', soft: 'rgba(147,123,171,0.16)', deep: '#6039A3', label: '#6039A3' }},
+            roic:   {{ bar: '#DEBBFF', border: '#9B86C0', soft: 'rgba(222,187,255,0.30)', deep: '#9B86C0', label: '#6039A3' }}
         }};
         
         const RENT_MESES_ORD = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO',
@@ -13381,7 +15282,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
-                            backgroundColor: '#3D2259',
+                            backgroundColor: '#3C2367',
                             padding: 12, cornerRadius: 8,
                             titleColor: '#ffffff', bodyColor: '#EADDF7',
                             titleFont: {{ family: 'Poppins', weight: '700', size: 13 }},
@@ -13410,7 +15311,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             ticks: {{
                                 // Etiquetas COMPLETAMENTE horizontales
                                 maxRotation: 0, minRotation: 0, autoSkip: false,
-                                font: {{ family: 'Poppins', size: 10.5, weight: '600' }}, color: '#3D2259'
+                                font: {{ family: 'Poppins', size: 10.5, weight: '600' }}, color: '#3C2367'
                             }}
                         }}
                     }},
@@ -13674,10 +15575,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         function colorMoraZona(pct) {{
-            if (pct < 3) return '#15803d';
-            if (pct < 6) return '#eab308';
-            if (pct < 9) return '#f97316';
-            return '#dc2626';
+            if (pct < 3) return '#17A53D';
+            if (pct < 6) return '#E2C403';
+            if (pct < 9) return '#F78502';
+            return '#C91A15';
         }}
         
         function gradosGaugeMora(porcentaje) {{
@@ -13733,13 +15634,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     datasets: [{{
                         label: 'Índice de Mora',
                         data: SERIE_INDICE_MORA,
-                        borderColor: '#dc2626',
-                        backgroundColor: 'rgba(220, 38, 38, 0.10)',
+                        borderColor: '#C91A15',
+                        backgroundColor: (c) => gradienteArea(c, '#C91A15'),
                         borderWidth: 2.8,
                         tension: 0.3,
                         fill: true,
                         pointBackgroundColor: SERIE_INDICE_MORA.map((v, i) =>
-                            i === idxActual ? '#7c2d12' : colorMoraZona(v)
+                            i === idxActual ? '#A0100B' : colorMoraZona(v)
                         ),
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
@@ -13773,7 +15674,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             borderColor: 'rgba(220, 38, 38, 0.25)',
                             borderWidth: 1,
                             padding: {{ top: 4, bottom: 4, left: 9, right: 9 }},
-                            color: '#7c2d12',
+                            color: '#A0100B',
                             font: {{
                                 family: "'JetBrains Mono', monospace",
                                 size: 10,
@@ -13786,7 +15687,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         y: {{
                             beginAtZero: true,
                             display: false,
-                            grid: {{ color: '#fef2f2' }},
+                            grid: {{ color: '#F8E5E4' }},
                             ticks: {{
                                 callback: (v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%',
                                 font: {{ size: 11 }},
@@ -13810,15 +15711,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             // Sincronizar eje Y HTML
-            sincronizarEjeYHistorico(SERIE_INDICE_MORA, 'chartMora-axis-container', {{
+            aplicarEjeAlChart(chartMora, sincronizarEjeYHistorico(SERIE_INDICE_MORA, 'chartMora-axis-container', {{
                 tituloEje: 'Índice de Mora (%)'
-            }});
+            }}));
         }}
         
         function actualizarGraficoMora(idxActual) {{
             if (!chartMora) return;
             chartMora.data.datasets[0].pointBackgroundColor = SERIE_INDICE_MORA.map((v, i) =>
-                i === idxActual ? '#7c2d12' : colorMoraZona(v)
+                i === idxActual ? '#A0100B' : colorMoraZona(v)
             );
             chartMora.data.datasets[0].pointRadius = SERIE_INDICE_MORA.map((_, i) =>
                 i === idxActual ? 8 : 4.5
@@ -14040,12 +15941,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             if (!container) return;
             opts = opts || {{}};
             const titulo = opts.tituloEje || 'Millones de pesos (COP)';
+            const minValue = opts.minValue || 0;   // permite ejes que no arrancan en 0
             
-            // Calculamos 5 ticks equiespaciados desde 0 hasta maxValue
-            // Hacemos los ticks "redondos" para mejor lectura
+            // Calculamos ticks "redondos" entre minValue y maxValue
             const numTicks = 5;
             const ticks = [];
-            const rawStep = maxValue / numTicks;
+            const rango = maxValue - minValue;
+            const rawStep = rango / numTicks;
             
             // Encontrar el step "redondo" más cercano
             const magnitude = Math.pow(10, Math.floor(Math.log10(Math.abs(rawStep) || 1)));
@@ -14056,12 +15958,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             else if (normalized < 7) niceStep = 5 * magnitude;
             else niceStep = 10 * magnitude;
             
-            // Recalcular el max con el step redondo
+            // Recalcular min y max alineados al step redondo
+            const niceMin = Math.floor(minValue / niceStep) * niceStep;
             const niceMax = Math.ceil(maxValue / niceStep) * niceStep;
-            const actualTicks = Math.round(niceMax / niceStep);
+            const actualTicks = Math.round((niceMax - niceMin) / niceStep);
             
             for (let i = actualTicks; i >= 0; i--) {{
-                ticks.push(i * niceStep);
+                ticks.push(niceMin + i * niceStep);
             }}
             
             // Generar HTML del eje
@@ -14079,14 +15982,27 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 </div>
             `;
             
-            // Guardamos el max real usado, para que el gráfico use la misma escala
+            // Guardamos min y max reales usados, para que el gráfico use la misma escala
             container.dataset.niceMax = niceMax;
-            return niceMax;
+            container.dataset.niceMin = niceMin;
+            return {{ niceMin: niceMin, niceMax: niceMax }};
         }}
         
         // Sincroniza un eje Y HTML con los datos de un gráfico histórico tipo línea.
         // Se llama DESPUÉS de crear el chart, lee la serie de datos y dibuja el eje.
         // Para los gráficos históricos, los valores son porcentajes (ej: 0%, 5%, 10%).
+        // Aplica el min/max calculado por el eje HTML al eje Y (oculto) del chart,
+        // para que la línea y el eje HTML queden perfectamente alineados.
+        function aplicarEjeAlChart(chart, ejeInfo) {{
+            if (!chart || !ejeInfo) return;
+            if (!chart.options.scales) chart.options.scales = {{}};
+            if (!chart.options.scales.y) chart.options.scales.y = {{}};
+            chart.options.scales.y.min = ejeInfo.niceMin;
+            chart.options.scales.y.max = ejeInfo.niceMax;
+            chart.options.scales.y.beginAtZero = (ejeInfo.niceMin === 0);
+            chart.update('none');
+        }}
+        
         function sincronizarEjeYHistorico(serie, containerId, opts) {{
             opts = opts || {{}};
             const formatter = opts.formatter || ((v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%');
@@ -14094,26 +16010,35 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             const valores = serie.filter(v => v !== null && v !== undefined && !isNaN(v));
             if (valores.length === 0) {{
-                renderEjeYHTML(containerId, 10, formatter, {{ tituloEje: titulo }});
-                return;
+                renderEjeYHTML(containerId, 10, formatter, {{ tituloEje: titulo, minValue: 0 }});
+                return {{ niceMin: 0, niceMax: 10 }};
             }}
             
             const minSerie = Math.min(...valores);
             const maxSerie = Math.max(...valores);
+            const rango = maxSerie - minSerie;
             
-            // Si todos son positivos, usamos 0 como mínimo del eje
-            // Si hay negativos (caso crecimiento), usamos un padding
-            let maxEje;
-            if (minSerie >= 0) {{
-                maxEje = maxSerie * 1.15;
-                if (maxEje < 1) maxEje = 1;  // mínimo 1% si todo es muy pequeño
-            }} else {{
-                // Para gráficos con negativos (crecimiento), usamos el valor absoluto más alto
+            let minEje, maxEje;
+            
+            if (minSerie < 0) {{
+                // Series con negativos (p.ej. crecimiento): eje simétrico/centrado en 0
                 const absMax = Math.max(Math.abs(minSerie), Math.abs(maxSerie));
                 maxEje = absMax * 1.15;
+                minEje = -absMax * 1.15;
+            }} else if (rango < minSerie * 0.5 && minSerie > 0) {{
+                // Datos POSITIVOS, LEJOS de cero y con poca variación relativa:
+                // ajustamos el eje a la banda de datos (con margen) para dar relieve.
+                const margen = Math.max(rango * 0.4, maxSerie * 0.04);
+                minEje = Math.max(0, minSerie - margen);
+                maxEje = maxSerie + margen;
+            }} else {{
+                // Datos que ya están cerca de 0 o con gran amplitud: eje desde 0.
+                minEje = 0;
+                maxEje = maxSerie * 1.15;
+                if (maxEje < 1) maxEje = 1;
             }}
             
-            renderEjeYHTML(containerId, maxEje, formatter, {{ tituloEje: titulo }});
+            return renderEjeYHTML(containerId, maxEje, formatter, {{ tituloEje: titulo, minValue: minEje }});
         }}
         
         function pillClaseMora(pct) {{
@@ -14147,7 +16072,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             </h3>
                             <div class="mora-grupo-indicador">
                                 <span style="color: #6b7268;">Cartera: <strong style="color: #1c2520; font-family: 'JetBrains Mono', monospace;">${{fmtMillonesMora(g.subtotal)}}</strong></span>
-                                <span style="color: #6b7268;">Mora: <strong style="color: #991b1b; font-family: 'JetBrains Mono', monospace;">${{fmtMillonesMora(g.mora)}}</strong></span>
+                                <span style="color: #6b7268;">Mora: <strong style="color: #A0100B; font-family: 'JetBrains Mono', monospace;">${{fmtMillonesMora(g.mora)}}</strong></span>
                                 <span class="mora-grupo-indice-pill ${{pillClase}}">Índice: ${{idx.toFixed(2).replace('.', ',')}}%</span>
                             </div>
                         </div>
@@ -14208,10 +16133,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const pct = r.indice_mora * 100;
             const estadoEl = document.getElementById('mora-estado-badge');
             let estadoTxt, estadoColor, estadoBg;
-            if (pct < 3) {{ estadoTxt = 'Bajo'; estadoColor = '#166534'; estadoBg = '#f0fdf4'; }}
-            else if (pct < 6) {{ estadoTxt = 'Aceptable'; estadoColor = '#a16207'; estadoBg = '#fefce8'; }}
-            else if (pct < 9) {{ estadoTxt = 'Alerta'; estadoColor = '#c2410c'; estadoBg = '#fff7ed'; }}
-            else {{ estadoTxt = 'Crítico'; estadoColor = '#991b1b'; estadoBg = '#fef2f2'; }}
+            if (pct < 3) {{ estadoTxt = 'Bajo'; estadoColor = '#11782C'; estadoBg = '#E8F6EC'; }}
+            else if (pct < 6) {{ estadoTxt = 'Aceptable'; estadoColor = '#AC9500'; estadoBg = '#F8F5DC'; }}
+            else if (pct < 9) {{ estadoTxt = 'Alerta'; estadoColor = '#A75A00'; estadoBg = '#F8E9D7'; }}
+            else {{ estadoTxt = 'Crítico'; estadoColor = '#A0100B'; estadoBg = '#F8E5E4'; }}
             estadoEl.textContent = estadoTxt;
             estadoEl.style.cssText = `background:${{estadoBg}};color:${{estadoColor}};border:1px solid ${{estadoColor}}40;padding:7px 16px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;`;
             
@@ -14225,7 +16150,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const idxPct = g.indice_grupo * 100;
                 document.getElementById(id).textContent = fmtMillonesMora(g.mora);
                 document.getElementById(id + '-sub').innerHTML = `
-                    <span class="badge ${{idxPct < 3 ? 'verde' : (idxPct < 9 ? 'verde' : 'rojo')}}" style="${{idxPct < 9 ? 'background:#fef3c7;color:#a16207;' : ''}}">${{idxPct.toFixed(2).replace('.', ',')}}%</span>
+                    <span class="badge ${{idxPct < 3 ? 'verde' : (idxPct < 9 ? 'verde' : 'rojo')}}" style="${{idxPct < 9 ? 'background:#F8F5DC;color:#AC9500;' : ''}}">${{idxPct.toFixed(2).replace('.', ',')}}%</span>
                     <span>de su cartera</span>
                 `;
             }};
@@ -14288,7 +16213,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         denSerie: SERIE_MORA_DEN,
                         numLabel: 'Mora Total',
                         denLabel: 'Cartera Total',
-                        colorNum: '#dc2626',
+                        colorNum: '#C91A15',
                         colorDen: '#fca5a5',
                         axisContainerId: 'chartMoraCompAxis-container'
                     }});
@@ -14377,10 +16302,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         function colorRiesgoZona(pct) {{
-            if (pct < 5) return '#15803d';
-            if (pct < 10) return '#eab308';
-            if (pct < 15) return '#f97316';
-            return '#1e40af';
+            if (pct < 5) return '#17A53D';
+            if (pct < 10) return '#E2C403';
+            if (pct < 15) return '#F78502';
+            return '#045988';
         }}
         
         function gradosGaugeRiesgo(porcentaje) {{
@@ -14436,13 +16361,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     datasets: [{{
                         label: 'Calidad de Cartera',
                         data: SERIE_CALIDAD_CARTERA,
-                        borderColor: '#1e40af',
-                        backgroundColor: 'rgba(30, 64, 175, 0.10)',
+                        borderColor: '#045988',
+                        backgroundColor: (c) => gradienteArea(c, '#045988'),
                         borderWidth: 2.8,
                         tension: 0.3,
                         fill: true,
                         pointBackgroundColor: SERIE_CALIDAD_CARTERA.map((v, i) =>
-                            i === idxActual ? '#1e3a8a' : colorRiesgoZona(v)
+                            i === idxActual ? '#033F61' : colorRiesgoZona(v)
                         ),
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
@@ -14458,7 +16383,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
-                            backgroundColor: '#1e3a8a',
+                            backgroundColor: '#033F61',
                             padding: 12,
                             cornerRadius: 8,
                             callbacks: {{
@@ -14476,7 +16401,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             borderColor: 'rgba(30, 64, 175, 0.30)',
                             borderWidth: 1,
                             padding: {{ top: 4, bottom: 4, left: 9, right: 9 }},
-                            color: '#1e3a8a',
+                            color: '#033F61',
                             font: {{
                                 family: "'JetBrains Mono', monospace",
                                 size: 10,
@@ -14489,7 +16414,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         y: {{
                             beginAtZero: true,
                             display: false,
-                            grid: {{ color: '#eff6ff' }},
+                            grid: {{ color: '#E8F2FA' }},
                             ticks: {{
                                 callback: (v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%',
                                 font: {{ size: 11 }},
@@ -14513,15 +16438,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             // Sincronizar eje Y HTML
-            sincronizarEjeYHistorico(SERIE_CALIDAD_CARTERA, 'chartRiesgo-axis-container', {{
+            aplicarEjeAlChart(chartRiesgo, sincronizarEjeYHistorico(SERIE_CALIDAD_CARTERA, 'chartRiesgo-axis-container', {{
                 tituloEje: 'Calidad de Cartera (%)'
-            }});
+            }}));
         }}
         
         function actualizarGraficoRiesgo(idxActual) {{
             if (!chartRiesgo) return;
             chartRiesgo.data.datasets[0].pointBackgroundColor = SERIE_CALIDAD_CARTERA.map((v, i) =>
-                i === idxActual ? '#1e3a8a' : colorRiesgoZona(v)
+                i === idxActual ? '#033F61' : colorRiesgoZona(v)
             );
             chartRiesgo.data.datasets[0].pointRadius = SERIE_CALIDAD_CARTERA.map((_, i) =>
                 i === idxActual ? 8 : 4.5
@@ -14673,15 +16598,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         
         // Configuración visual por modalidad
         const HISTORICO_CONFIG = {{
-            'vivienda':            {{ color: '#8b5cf6', deep: '#5b21b6', light: '#a78bfa', lighter: '#c4b5fd', soft: 'rgba(139,92,246,0.10)', glow: 'rgba(139,92,246,0.55)', color30: 'rgba(139,92,246,0.30)' }},
-            'consumo':             {{ color: '#f59e0b', deep: '#b45309', light: '#fbbf24', lighter: '#fcd34d', soft: 'rgba(245,158,11,0.10)', glow: 'rgba(245,158,11,0.55)', color30: 'rgba(245,158,11,0.30)' }},
-            'consumo_con_libranza':{{ color: '#ec4899', deep: '#9d174d', light: '#f472b6', lighter: '#f9a8d4', soft: 'rgba(236,72,153,0.10)', glow: 'rgba(236,72,153,0.55)', color30: 'rgba(236,72,153,0.30)' }},
-            'consumo_sin_libranza':{{ color: '#f59e0b', deep: '#b45309', light: '#fbbf24', lighter: '#fcd34d', soft: 'rgba(245,158,11,0.10)', glow: 'rgba(245,158,11,0.55)', color30: 'rgba(245,158,11,0.30)' }},
-            'microcredito':        {{ color: '#06b6d4', deep: '#0e7490', light: '#22d3ee', lighter: '#67e8f9', soft: 'rgba(6,182,212,0.10)', glow: 'rgba(6,182,212,0.55)', color30: 'rgba(6,182,212,0.30)' }},
-            'microcredito_empresarial': {{ color: '#06b6d4', deep: '#0e7490', light: '#22d3ee', lighter: '#67e8f9', soft: 'rgba(6,182,212,0.10)', glow: 'rgba(6,182,212,0.55)', color30: 'rgba(6,182,212,0.30)' }},
-            'comercial':           {{ color: '#14b8a6', deep: '#0f766e', light: '#2dd4bf', lighter: '#5eead4', soft: 'rgba(20,184,166,0.10)', glow: 'rgba(20,184,166,0.55)', color30: 'rgba(20,184,166,0.30)' }},
-            'riesgo':              {{ color: '#1e40af', deep: '#1e3a8a', light: '#3b82f6', lighter: '#60a5fa', soft: 'rgba(30,64,175,0.10)', glow: 'rgba(30,64,175,0.55)', color30: 'rgba(30,64,175,0.30)' }},
-            'total':               {{ color: '#6366f1', deep: '#4338ca', light: '#818cf8', lighter: '#a5b4fc', soft: 'rgba(99,102,241,0.10)', glow: 'rgba(99,102,241,0.55)', color30: 'rgba(99,102,241,0.30)' }},
+            'vivienda':            {{ color: '#6039A3', deep: '#3C2367', light: '#B4A0D5', lighter: '#D6CCE6', soft: 'rgba(139,92,246,0.10)', glow: 'rgba(139,92,246,0.55)', color30: 'rgba(139,92,246,0.30)' }},
+            'consumo':             {{ color: '#F78502', deep: '#A75A00', light: '#F6A141', lighter: '#F4CC9E', soft: 'rgba(245,158,11,0.10)', glow: 'rgba(245,158,11,0.55)', color30: 'rgba(245,158,11,0.30)' }},
+            'consumo_con_libranza':{{ color: '#CD3F94', deep: '#7A1F4F', light: '#f472b6', lighter: '#E7BED7', soft: 'rgba(236,72,153,0.10)', glow: 'rgba(236,72,153,0.55)', color30: 'rgba(236,72,153,0.30)' }},
+            'consumo_sin_libranza':{{ color: '#F78502', deep: '#A75A00', light: '#F6A141', lighter: '#F4CC9E', soft: 'rgba(245,158,11,0.10)', glow: 'rgba(245,158,11,0.55)', color30: 'rgba(245,158,11,0.30)' }},
+            'microcredito':        {{ color: '#36BAA8', deep: '#237C70', light: '#62CBBD', lighter: '#67e8f9', soft: 'rgba(6,182,212,0.10)', glow: 'rgba(6,182,212,0.55)', color30: 'rgba(6,182,212,0.30)' }},
+            'microcredito_empresarial': {{ color: '#36BAA8', deep: '#237C70', light: '#62CBBD', lighter: '#67e8f9', soft: 'rgba(6,182,212,0.10)', glow: 'rgba(6,182,212,0.55)', color30: 'rgba(6,182,212,0.30)' }},
+            'comercial':           {{ color: '#36BAA8', deep: '#237C70', light: '#62CBBD', lighter: '#ABDED7', soft: 'rgba(20,184,166,0.10)', glow: 'rgba(20,184,166,0.55)', color30: 'rgba(20,184,166,0.30)' }},
+            'riesgo':              {{ color: '#045988', deep: '#033F61', light: '#2CAAEE', lighter: '#89CAED', soft: 'rgba(30,64,175,0.10)', glow: 'rgba(30,64,175,0.55)', color30: 'rgba(30,64,175,0.30)' }},
+            'total':               {{ color: '#088DD5', deep: '#045988', light: '#2CAAEE', lighter: '#89CAED', soft: 'rgba(99,102,241,0.10)', glow: 'rgba(99,102,241,0.55)', color30: 'rgba(99,102,241,0.30)' }},
         }};
         
         // Construye serie histórica para una modalidad/tipo
@@ -14845,7 +16770,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     const tendEl = document.getElementById('historico-tendencia');
                     tendEl.textContent = `${{flecha}} ${{signo}}${{dif.toFixed(2).replace('.', ',')}} pp`;
                     // Verde si baja (mejora), rojo si sube (empeora)
-                    tendEl.style.color = dif <= 0 ? '#15803d' : '#dc2626';
+                    tendEl.style.color = dif <= 0 ? '#17A53D' : '#C91A15';
                 }} else {{
                     document.getElementById('historico-tendencia').textContent = 'N/A';
                     document.getElementById('historico-tendencia').style.color = '#9ca3af';
@@ -15005,10 +16930,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const fmtModal = (tipo === 'crecimiento')
                 ? (v) => (v >= 0 ? '+' : '') + (Math.round(v * 10) / 10).toString().replace('.', ',') + '%'
                 : (v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%';
-            sincronizarEjeYHistorico(serie, 'chartHistoricoModalidad-axis-container', {{
+            aplicarEjeAlChart(chartHistoricoModalidad, sincronizarEjeYHistorico(serie, 'chartHistoricoModalidad-axis-container', {{
                 tituloEje: tituloModal,
                 formatter: fmtModal
-            }});
+            }}));
             
             // ==========================================================
             // GRÁFICO DE COMPOSICIÓN Y TABLA RESUMEN PARA EL MODAL
@@ -15241,10 +17166,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const pct = r.calidad_cartera * 100;
             const estadoEl = document.getElementById('riesgo-estado-badge');
             let estadoTxt, estadoColor, estadoBg;
-            if (pct < 5) {{ estadoTxt = 'Excelente'; estadoColor = '#166534'; estadoBg = '#f0fdf4'; }}
-            else if (pct < 10) {{ estadoTxt = 'Aceptable'; estadoColor = '#a16207'; estadoBg = '#fefce8'; }}
-            else if (pct < 15) {{ estadoTxt = 'Alerta'; estadoColor = '#c2410c'; estadoBg = '#fff7ed'; }}
-            else {{ estadoTxt = 'Crítico'; estadoColor = '#1e3a8a'; estadoBg = '#eff6ff'; }}
+            if (pct < 5) {{ estadoTxt = 'Excelente'; estadoColor = '#11782C'; estadoBg = '#E8F6EC'; }}
+            else if (pct < 10) {{ estadoTxt = 'Aceptable'; estadoColor = '#AC9500'; estadoBg = '#F8F5DC'; }}
+            else if (pct < 15) {{ estadoTxt = 'Alerta'; estadoColor = '#A75A00'; estadoBg = '#F8E9D7'; }}
+            else {{ estadoTxt = 'Crítico'; estadoColor = '#033F61'; estadoBg = '#E8F2FA'; }}
             estadoEl.textContent = estadoTxt;
             estadoEl.style.cssText = `background:${{estadoBg}};color:${{estadoColor}};border:1px solid ${{estadoColor}}40;padding:7px 16px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;`;
             
@@ -15261,12 +17186,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             document.getElementById('riesgo-kpi-CD').textContent = fmtMillonesMora(valCD);
             document.getElementById('riesgo-kpi-CD-sub').innerHTML = `
-                <span class="badge" style="background:#fff7ed;color:#c2410c;">${{pctCD.toFixed(2).replace('.', ',')}}%</span>
+                <span class="badge" style="background:#F8E9D7;color:#A75A00;">${{pctCD.toFixed(2).replace('.', ',')}}%</span>
                 <span>del total</span>`;
             
             document.getElementById('riesgo-kpi-E').textContent = fmtMillonesMora(r.cartera_E);
             document.getElementById('riesgo-kpi-E-sub').innerHTML = `
-                <span class="badge" style="background:#eff6ff;color:#1e3a8a;">${{pctE.toFixed(2).replace('.', ',')}}%</span>
+                <span class="badge" style="background:#E8F2FA;color:#033F61;">${{pctE.toFixed(2).replace('.', ',')}}%</span>
                 <span>del total</span>`;
             
             renderCategoriaRiesgo(r);
@@ -15324,7 +17249,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         denSerie: SERIE_RIESGO_DEN,
                         numLabel: 'Cartera B+C+D+E',
                         denLabel: 'Cartera Total',
-                        colorNum: '#1e40af',
+                        colorNum: '#045988',
                         colorDen: '#93c5fd',
                         axisContainerId: 'chartRiesgoCompAxis-container'
                     }});
@@ -15414,10 +17339,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         function colorCoberturaZona(pct) {{
-            if (pct < 25) return '#dc2626';
-            if (pct < 50) return '#f97316';
-            if (pct < 75) return '#eab308';
-            return '#15803d';
+            if (pct < 25) return '#C91A15';
+            if (pct < 50) return '#F78502';
+            if (pct < 75) return '#E2C403';
+            return '#17A53D';
         }}
         
         function gradosGaugeCobertura(porcentaje) {{
@@ -15472,13 +17397,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     datasets: [{{
                         label: 'Cobertura de Cartera',
                         data: SERIE_COBERTURA,
-                        borderColor: '#14b8a6',
-                        backgroundColor: 'rgba(20, 184, 166, 0.10)',
+                        borderColor: '#36BAA8',
+                        backgroundColor: (c) => gradienteArea(c, '#36BAA8'),
                         borderWidth: 2.8,
                         tension: 0.3,
                         fill: true,
                         pointBackgroundColor: SERIE_COBERTURA.map((v, i) =>
-                            i === idxActual ? '#0f766e' : colorCoberturaZona(v)
+                            i === idxActual ? '#237C70' : colorCoberturaZona(v)
                         ),
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
@@ -15494,7 +17419,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
-                            backgroundColor: '#0f766e',
+                            backgroundColor: '#237C70',
                             padding: 12,
                             cornerRadius: 8,
                             callbacks: {{
@@ -15512,7 +17437,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             borderColor: 'rgba(20, 184, 166, 0.30)',
                             borderWidth: 1,
                             padding: {{ top: 4, bottom: 4, left: 9, right: 9 }},
-                            color: '#0f766e',
+                            color: '#237C70',
                             font: {{
                                 family: "'JetBrains Mono', monospace",
                                 size: 10,
@@ -15525,7 +17450,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         y: {{
                             beginAtZero: true,
                             display: false,
-                            grid: {{ color: '#f0fdfa' }},
+                            grid: {{ color: '#D8EEEB' }},
                             ticks: {{
                                 callback: (v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%',
                                 font: {{ size: 11 }},
@@ -15549,15 +17474,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             // Sincronizar eje Y HTML
-            sincronizarEjeYHistorico(SERIE_COBERTURA, 'chartCobertura-axis-container', {{
+            aplicarEjeAlChart(chartCobertura, sincronizarEjeYHistorico(SERIE_COBERTURA, 'chartCobertura-axis-container', {{
                 tituloEje: 'Cobertura (%)'
-            }});
+            }}));
         }}
         
         function actualizarGraficoCobertura(idxActual) {{
             if (!chartCobertura) return;
             chartCobertura.data.datasets[0].pointBackgroundColor = SERIE_COBERTURA.map((v, i) =>
-                i === idxActual ? '#0f766e' : colorCoberturaZona(v)
+                i === idxActual ? '#237C70' : colorCoberturaZona(v)
             );
             chartCobertura.data.datasets[0].pointRadius = SERIE_COBERTURA.map((_, i) =>
                 i === idxActual ? 8 : 4.5
@@ -15640,10 +17565,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const pct = obtenerCoberturaActiva(r) * 100;
             const estadoEl = document.getElementById('cobertura-estado-badge');
             let estadoTxt, estadoColor, estadoBg;
-            if (pct < 25)      {{ estadoTxt = 'Insuficiente'; estadoColor = '#991b1b'; estadoBg = '#fef2f2'; }}
-            else if (pct < 50) {{ estadoTxt = 'Bajo'; estadoColor = '#c2410c'; estadoBg = '#fff7ed'; }}
-            else if (pct < 75) {{ estadoTxt = 'Aceptable'; estadoColor = '#a16207'; estadoBg = '#fefce8'; }}
-            else               {{ estadoTxt = 'Sólido'; estadoColor = '#166534'; estadoBg = '#f0fdf4'; }}
+            if (pct < 25)      {{ estadoTxt = 'Insuficiente'; estadoColor = '#A0100B'; estadoBg = '#F8E5E4'; }}
+            else if (pct < 50) {{ estadoTxt = 'Bajo'; estadoColor = '#A75A00'; estadoBg = '#F8E9D7'; }}
+            else if (pct < 75) {{ estadoTxt = 'Aceptable'; estadoColor = '#AC9500'; estadoBg = '#F8F5DC'; }}
+            else               {{ estadoTxt = 'Sólido'; estadoColor = '#11782C'; estadoBg = '#E8F6EC'; }}
             estadoEl.textContent = estadoTxt;
             estadoEl.style.cssText = `background:${{estadoBg}};color:${{estadoColor}};border:1px solid ${{estadoColor}}40;padding:7px 16px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;`;
             
@@ -15662,9 +17587,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const pctMod = data.indice * 100;
                 document.getElementById(idKpi).textContent = pctMod.toFixed(2).replace('.', ',') + '%';
                 let badgeStyle = '';
-                if (pctMod < 50) badgeStyle = 'background:#fef2f2;color:#991b1b;';
-                else if (pctMod < 75) badgeStyle = 'background:#fefce8;color:#a16207;';
-                else badgeStyle = 'background:#f0fdf4;color:#166534;';
+                if (pctMod < 50) badgeStyle = 'background:#F8E5E4;color:#A0100B;';
+                else if (pctMod < 75) badgeStyle = 'background:#F8F5DC;color:#AC9500;';
+                else badgeStyle = 'background:#E8F6EC;color:#11782C;';
                 document.getElementById(idKpi + '-sub').innerHTML = `
                     <span class="badge" style="${{badgeStyle}}">${{fmtMillonesMora(data.numerador)}} M</span>
                     <span>de provisión</span>`;
@@ -15682,7 +17607,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const otrosPct = otrosNum / otrosDen * 100;
                 document.getElementById('cobertura-kpi-otros').textContent = otrosPct.toFixed(2).replace('.', ',') + '%';
                 document.getElementById('cobertura-kpi-otros-sub').innerHTML = `
-                    <span class="badge" style="background:#f0fdfa;color:#0f766e;">${{fmtMillonesMora(otrosNum)}} M</span>
+                    <span class="badge" style="background:#D8EEEB;color:#237C70;">${{fmtMillonesMora(otrosNum)}} M</span>
                     <span>de provisión</span>`;
             }}
             
@@ -15739,8 +17664,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         denSerie: SERIE_COBERTURA_DEN,
                         numLabel: 'Deterioro Total',
                         denLabel: 'Cartera Vencida (B+C+D+E)',
-                        colorNum: '#0d9488',
-                        colorDen: '#5eead4',
+                        colorNum: '#2A9488',
+                        colorDen: '#ABDED7',
                         axisContainerId: 'chartCoberturaCompAxis-container'
                     }});
                     setTimeout(() => {{
@@ -15829,10 +17754,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         
         function colorCrecZona(pct) {{
             if (pct === null) return '#9ca3af';
-            if (pct < 0) return '#dc2626';
-            if (pct < 5) return '#eab308';
-            if (pct < 10) return '#15803d';
-            return '#6366f1';
+            if (pct < 0) return '#C91A15';
+            if (pct < 5) return '#E2C403';
+            if (pct < 10) return '#17A53D';
+            return '#088DD5';
         }}
         
         function gradosGaugeCrec(porcentaje) {{
@@ -15897,14 +17822,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     datasets: [{{
                         label: 'Crecimiento Anual',
                         data: SERIE_CRECIMIENTO_TOTAL,
-                        borderColor: '#6366f1',
-                        backgroundColor: 'rgba(99, 102, 241, 0.10)',
+                        borderColor: '#088DD5',
+                        backgroundColor: (c) => gradienteArea(c, '#088DD5'),
                         borderWidth: 2.8,
                         tension: 0.3,
                         fill: true,
                         spanGaps: true,
                         pointBackgroundColor: SERIE_CRECIMIENTO_TOTAL.map((v, i) =>
-                            i === idxActual ? '#4338ca' : colorCrecZona(v)
+                            i === idxActual ? '#045988' : colorCrecZona(v)
                         ),
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
@@ -15922,7 +17847,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
-                            backgroundColor: '#4338ca',
+                            backgroundColor: '#045988',
                             padding: 12,
                             cornerRadius: 8,
                             titleColor: '#ffffff',
@@ -15944,7 +17869,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             borderColor: 'rgba(99, 102, 241, 0.30)',
                             borderWidth: 1,
                             padding: {{ top: 4, bottom: 4, left: 9, right: 9 }},
-                            color: '#4338ca',
+                            color: '#045988',
                             font: {{
                                 family: "'JetBrains Mono', monospace",
                                 size: 10,
@@ -15987,16 +17912,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
             // Sincronizar eje Y HTML (con formato +/- para crecimiento)
             const fmtCrecPct = (v) => (v >= 0 ? '+' : '') + (Math.round(v * 10) / 10).toString().replace('.', ',') + '%';
-            sincronizarEjeYHistorico(SERIE_CRECIMIENTO_TOTAL, 'chartCrecimiento-axis-container', {{
+            aplicarEjeAlChart(chartCrecimiento, sincronizarEjeYHistorico(SERIE_CRECIMIENTO_TOTAL, 'chartCrecimiento-axis-container', {{
                 tituloEje: 'Crecimiento (%)',
                 formatter: fmtCrecPct
-            }});
+            }}));
         }}
         
         function actualizarGraficoCrecimiento(idxActual) {{
             if (!chartCrecimiento) return;
             chartCrecimiento.data.datasets[0].pointBackgroundColor = SERIE_CRECIMIENTO_TOTAL.map((v, i) =>
-                i === idxActual ? '#4338ca' : colorCrecZona(v)
+                i === idxActual ? '#045988' : colorCrecZona(v)
             );
             chartCrecimiento.data.datasets[0].pointRadius = SERIE_CRECIMIENTO_TOTAL.map((v, i) =>
                 v === null ? 0 : (i === idxActual ? 8 : 4.5)
@@ -16092,10 +18017,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 estadoTxt = 'Sin año anterior'; estadoColor = '#6b7268'; estadoBg = '#f3f4f6';
             }} else {{
                 const pct = r.crecimiento_total * 100;
-                if (pct < 0)       {{ estadoTxt = 'Contracción';  estadoColor = '#991b1b'; estadoBg = '#fef2f2'; }}
-                else if (pct < 5)  {{ estadoTxt = 'Bajo';         estadoColor = '#a16207'; estadoBg = '#fefce8'; }}
-                else if (pct < 10) {{ estadoTxt = 'Saludable';    estadoColor = '#166534'; estadoBg = '#f0fdf4'; }}
-                else               {{ estadoTxt = 'Acelerado';    estadoColor = '#4338ca'; estadoBg = '#eef2ff'; }}
+                if (pct < 0)       {{ estadoTxt = 'Contracción';  estadoColor = '#A0100B'; estadoBg = '#F8E5E4'; }}
+                else if (pct < 5)  {{ estadoTxt = 'Bajo';         estadoColor = '#AC9500'; estadoBg = '#F8F5DC'; }}
+                else if (pct < 10) {{ estadoTxt = 'Saludable';    estadoColor = '#11782C'; estadoBg = '#E8F6EC'; }}
+                else               {{ estadoTxt = 'Acelerado';    estadoColor = '#045988'; estadoBg = '#eef2ff'; }}
             }}
             estadoEl.textContent = estadoTxt;
             estadoEl.style.cssText = `background:${{estadoBg}};color:${{estadoColor}};border:1px solid ${{estadoColor}}40;padding:7px 16px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;`;
@@ -16117,10 +18042,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const color = colorCrecZona(pct);
                 document.getElementById(idKpi).innerHTML = `<span style="color:${{color}};">${{signo}}${{pct.toFixed(2).replace('.', ',')}}%</span>`;
                 let badgeStyle = '';
-                if (pct < 0) badgeStyle = 'background:#fef2f2;color:#991b1b;';
-                else if (pct < 5) badgeStyle = 'background:#fefce8;color:#a16207;';
-                else if (pct < 10) badgeStyle = 'background:#f0fdf4;color:#166534;';
-                else badgeStyle = 'background:#eef2ff;color:#4338ca;';
+                if (pct < 0) badgeStyle = 'background:#F8E5E4;color:#A0100B;';
+                else if (pct < 5) badgeStyle = 'background:#F8F5DC;color:#AC9500;';
+                else if (pct < 10) badgeStyle = 'background:#E8F6EC;color:#11782C;';
+                else badgeStyle = 'background:#eef2ff;color:#045988;';
                 document.getElementById(idKpi + '-sub').innerHTML = `
                     <span class="badge" style="${{badgeStyle}}">${{fmtMillonesMora(dataObj.actual)}} M</span>
                     <span>actual</span>`;
@@ -16197,8 +18122,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         denSerie: SERIE_CREC_DEN,
                         numLabel: 'Cartera Período Actual',
                         denLabel: 'Cartera Año Anterior',
-                        colorNum: '#6366f1',
-                        colorDen: '#a5b4fc',
+                        colorNum: '#088DD5',
+                        colorDen: '#89CAED',
                         axisContainerId: 'chartCrecimientoCompAxis-container'
                     }});
                     setTimeout(() => {{
@@ -16254,8 +18179,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         denSerie: SERIE_SOLVENCIA_DEN,
                         numLabel: 'Patrimonio Técnico',
                         denLabel: 'APR',
-                        colorNum: '#15803d',
-                        colorDen: '#86efac',
+                        colorNum: '#17A53D',
+                        colorDen: '#ADE6BC',
                         axisContainerId: 'chartSolvenciaCompAxis-container'
                     }});
                     setTimeout(() => {{
@@ -16292,6 +18217,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // (El DOMContentLoaded original queda vacío: el dashboard se inicializa
         //  cuando el usuario hace clic en "Solvencia" desde el menú principal)
         document.addEventListener('DOMContentLoaded', () => {{
+            // Estamos en el inicio al cargar → ocultar botón 🏠
+            document.body.classList.add('en-inicio');
             // Construir el tablero resumen (2 matrices de indicadores)
             try {{ construirTableroResumen(); }} catch(e) {{ console.error('Error tablero:', e); }}
         }});
@@ -16299,6 +18226,383 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // ============================================================
         // ========== TABLERO RESUMEN · 2 MATRICES ==========
         // ============================================================
+        // =====================================================================
+        // INFORME ANALÍTICO EN PDF DEL TABLERO DE INDICADORES
+        // ---------------------------------------------------------------------
+        // Recorre los indicadores del tablero (% y $), calcula valor actual,
+        // variación vs mes anterior, vs año anterior y tendencia reciente, y
+        // redacta un informe descriptivo basado en reglas. 100% offline (jsPDF).
+        // =====================================================================
+
+        // Pobla los selectores Desde/Hasta con los períodos disponibles.
+        function poblarSelectoresInforme() {{
+            const data = window.TABLERO_DATA;
+            if (!data || !data.periodos) return;
+            const desde = document.getElementById('informe-desde');
+            const hasta = document.getElementById('informe-hasta');
+            if (!desde || !hasta || desde.options.length > 0) return;
+            data.periodos.forEach((p, i) => {{
+                const o1 = document.createElement('option');
+                o1.value = i; o1.textContent = p.largo;
+                desde.appendChild(o1);
+                const o2 = document.createElement('option');
+                o2.value = i; o2.textContent = p.largo;
+                hasta.appendChild(o2);
+            }});
+            const N = data.periodos.length;
+            // Por defecto: últimos 12 meses (o todo si hay menos)
+            desde.value = Math.max(0, N - 12);
+            hasta.value = N - 1;
+        }}
+
+        // Capitaliza la primera letra de un texto
+        function _capitaliza(s) {{
+            if (!s) return s;
+            return s.charAt(0).toUpperCase() + s.slice(1);
+        }}
+        // Formateadores locales para el informe
+        function _fmtPctInf(v) {{
+            return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(2).replace('.', ',') + '%';
+        }}
+        function _fmtMillInf(v) {{
+            return (v === null || v === undefined || isNaN(v)) ? '—' :
+                new Intl.NumberFormat('de-DE', {{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}).format(v);
+        }}
+        // Texto de variación según unidad
+        function _txtVar(actual, anterior, unidad) {{
+            if (actual === null || anterior === null || actual === undefined || anterior === undefined || anterior === 0) return null;
+            const delta = actual - anterior;
+            const sube = delta > 0;
+            const signo = sube ? '+' : '';
+            if (unidad === 'pb') return signo + Math.round(delta * 100) + ' pb';
+            if (unidad === 'pts') return signo + delta.toFixed(2).replace('.', ',') + ' pts';
+            // '%' relativo (montos)
+            const pct = (delta / Math.abs(anterior)) * 100;
+            return signo + pct.toFixed(1).replace('.', ',') + '%';
+        }}
+        // Palabra de dirección considerando si "subir" es bueno o malo
+        function _dir(delta, invertir) {{
+            if (Math.abs(delta) < 1e-9) return 'se mantuvo estable';
+            const sube = delta > 0;
+            return sube ? 'aumentó' : 'disminuyó';
+        }}
+        // Encuentra el último índice con valor no nulo en [ini..fin]
+        function _ultimoValido(serie, ini, fin) {{
+            for (let i = fin; i >= ini; i--) {{
+                if (serie[i] !== null && serie[i] !== undefined && !isNaN(serie[i])) return i;
+            }}
+            return -1;
+        }}
+
+        // Construye el análisis de un indicador para el rango [iniIdx..finIdx]
+        function _analizarIndicador(ind, iniIdx, finIdx, periodos) {{
+            const serie = ind.serie;
+            const idxAct = _ultimoValido(serie, iniIdx, finIdx);
+            if (idxAct < 0) return null;
+            const valActual = serie[idxAct];
+            const fmt = ind.esPorcentaje ? _fmtPctInf : _fmtMillInf;
+
+            // Variación vs período anterior
+            let idxPrev = _ultimoValido(serie, 0, idxAct - 1);
+            let varMes = null, deltaMes = null;
+            if (idxPrev >= 0) {{
+                varMes = _txtVar(valActual, serie[idxPrev], ind.unidad);
+                deltaMes = valActual - serie[idxPrev];
+            }}
+            // Variación vs año anterior (12 períodos atrás)
+            let varAnio = null, deltaAnio = null;
+            const idxAA = idxAct - 12;
+            if (idxAA >= 0 && serie[idxAA] !== null && serie[idxAA] !== undefined && !isNaN(serie[idxAA]) && serie[idxAA] !== 0) {{
+                varAnio = _txtVar(valActual, serie[idxAA], ind.unidad);
+                deltaAnio = valActual - serie[idxAA];
+            }}
+            // Tendencia reciente: pendiente sobre la ventana [iniIdx..idxAct]
+            const ventana = [];
+            for (let i = iniIdx; i <= idxAct; i++) {{
+                if (serie[i] !== null && serie[i] !== undefined && !isNaN(serie[i])) ventana.push(serie[i]);
+            }}
+            let tendencia = 'sin variación apreciable';
+            let minV = null, maxV = null, minIdx = -1, maxIdx = -1;
+            if (ventana.length >= 2) {{
+                const prim = ventana[0], ult = ventana[ventana.length - 1];
+                const cambio = ult - prim;
+                const ref = ind.esPorcentaje ? 0.1 : Math.abs(prim) * 0.01;
+                if (Math.abs(cambio) <= ref) tendencia = 'una tendencia estable';
+                else tendencia = cambio > 0 ? 'una tendencia al alza' : 'una tendencia a la baja';
+                // máximos/mínimos de la ventana
+                for (let i = iniIdx; i <= idxAct; i++) {{
+                    const v = serie[i];
+                    if (v === null || v === undefined || isNaN(v)) continue;
+                    if (minV === null || v < minV) {{ minV = v; minIdx = i; }}
+                    if (maxV === null || v > maxV) {{ maxV = v; maxIdx = i; }}
+                }}
+            }}
+            return {{
+                nombre: ind.nombre, modulo: ind.modulo,
+                valActual: fmt(valActual), idxAct,
+                varMes, deltaMes, varAnio, deltaAnio,
+                tendencia, invertir: ind.invertir,
+                minV: minV !== null ? fmt(minV) : null, minIdx,
+                maxV: maxV !== null ? fmt(maxV) : null, maxIdx,
+                unidad: ind.unidad
+            }};
+        }}
+
+        // Redacta el párrafo descriptivo de un indicador
+        function _redactarParrafo(a, periodos) {{
+            if (!a) return '';
+            const pAct = periodos[a.idxAct] ? periodos[a.idxAct].largo : '';
+            let s = `${{a.nombre}} se ubicó en ${{a.valActual}} en ${{pAct}}`;
+            if (a.varMes !== null) {{
+                const palabra = _dir(a.deltaMes, a.invertir);
+                s += `, tras ${{palabra}} ${{a.varMes}} frente al período anterior`;
+            }}
+            s += '. ';
+            if (a.varAnio !== null) {{
+                const palabraA = _dir(a.deltaAnio, a.invertir);
+                s += `En términos interanuales ${{palabraA}} ${{a.varAnio}}. `;
+            }}
+            s += `Durante el rango analizado mostró ${{a.tendencia}}`;
+            if (a.minV !== null && a.maxV !== null && a.minIdx !== a.maxIdx) {{
+                const pMin = periodos[a.minIdx] ? periodos[a.minIdx].largo : '';
+                const pMax = periodos[a.maxIdx] ? periodos[a.maxIdx].largo : '';
+                s += `, oscilando entre un mínimo de ${{a.minV}} (${{pMin}}) y un máximo de ${{a.maxV}} (${{pMax}})`;
+            }}
+            s += '.';
+            return s;
+        }}
+
+        // Genera y descarga el informe PDF
+        function generarInformeTablero() {{
+            const data = window.TABLERO_DATA;
+            const btn = document.getElementById('btn-informe');
+            if (!data) {{ alert('Los datos del tablero aún no están listos. Intenta de nuevo en un momento.'); return; }}
+            if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {{
+                alert('No se pudo cargar el generador de PDF (jsPDF). Verifica tu conexión o la versión offline.');
+                return;
+            }}
+            const iniIdx = parseInt(document.getElementById('informe-desde').value, 10);
+            const finIdx = parseInt(document.getElementById('informe-hasta').value, 10);
+            if (isNaN(iniIdx) || isNaN(finIdx) || iniIdx > finIdx) {{
+                alert('El rango es inválido: el período "Desde" debe ser anterior o igual a "Hasta".');
+                return;
+            }}
+            const textoOrig = btn.querySelector('span').textContent;
+            btn.disabled = true;
+            btn.querySelector('span').textContent = 'Generando…';
+
+            try {{
+                const {{ jsPDF }} = window.jspdf;
+                const doc = new jsPDF({{ unit: 'pt', format: 'a4' }});
+                const W = doc.internal.pageSize.getWidth();
+                const H = doc.internal.pageSize.getHeight();
+                const MX = 48;            // margen izq/der
+                const MAXW = W - MX * 2;  // ancho útil
+                let y = 0;
+
+                const periodos = data.periodos;
+                const pIni = periodos[iniIdx].largo;
+                const pFin = periodos[finIdx].largo;
+                const nMeses = finIdx - iniIdx + 1;
+
+                // Colores de paleta (escala de azules de la imagen de referencia)
+                const C_AZUL = [19, 143, 199];     // #138FC7 azul de la escala
+                const C_AZUL_OSC = [16, 110, 160]; // azul más oscuro para contraste
+                const C_CIAN = [129, 213, 232];    // #81D5E8 cian claro de la escala
+                const C_OSCURO = [28, 37, 32];
+                const C_GRIS = [107, 114, 104];
+                const C_VERDE = [17, 120, 44];
+                const C_ROJO = [201, 26, 21];
+
+                // ---- helper salto de página ----
+                function checkPage(alturaNecesaria) {{
+                    if (y + alturaNecesaria > H - 56) {{
+                        pieDePagina();
+                        doc.addPage();
+                        y = 56;
+                        return true;
+                    }}
+                    return false;
+                }}
+                let numPagina = 0;
+                function pieDePagina() {{
+                    numPagina++;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(160, 165, 156);
+                    doc.text('Informe generado automáticamente desde el Dashboard Financiero Cooperativo', MX, H - 30);
+                    doc.text('Pág. ' + numPagina, W - MX, H - 30, {{ align: 'right' }});
+                }}
+
+                // ---- PORTADA / ENCABEZADO con degradado de la escala de azules ----
+                // Degradado horizontal: azul oscuro (izq) -> cian claro (der), dibujado en bandas.
+                const HEAD_H = 132;
+                const bandas = 120;
+                const bw = W / bandas;
+                for (let i = 0; i < bandas; i++) {{
+                    const t = i / (bandas - 1);
+                    const r = Math.round(C_AZUL_OSC[0] + (C_CIAN[0] - C_AZUL_OSC[0]) * t);
+                    const g = Math.round(C_AZUL_OSC[1] + (C_CIAN[1] - C_AZUL_OSC[1]) * t);
+                    const b = Math.round(C_AZUL_OSC[2] + (C_CIAN[2] - C_AZUL_OSC[2]) * t);
+                    doc.setFillColor(r, g, b);
+                    doc.rect(i * bw, 0, bw + 1, HEAD_H, 'F');
+                }}
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(22);
+                doc.setTextColor(255, 255, 255);
+                doc.text('Informe de Indicadores Financieros', MX, 58);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.text('Análisis del comportamiento y variaciones del tablero principal', MX, 80);
+                doc.setFontSize(10);
+                doc.text('Periodo analizado: ' + pIni + '  -  ' + pFin + '   (' + nMeses + ' meses)', MX, 104);
+                const hoy = new Date();
+                doc.text('Fecha de emisión: ' + hoy.toLocaleDateString('es-CO', {{ year: 'numeric', month: 'long', day: 'numeric' }}), MX, 120);
+                y = 164;
+
+                // ---- NOTA METODOLÓGICA ----
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(8.5);
+                doc.setTextColor(C_GRIS[0], C_GRIS[1], C_GRIS[2]);
+                const nota = 'Documento descriptivo de carácter informativo, generado a partir de los datos del tablero. ' +
+                    'No constituye asesoría financiera ni recomendación de inversión. Las variaciones "vs período anterior" ' +
+                    'comparan con el mes inmediatamente previo; las "interanuales" comparan con el mismo mes del año anterior (12 meses atrás).';
+                const notaLines = doc.splitTextToSize(nota, MAXW);
+                doc.text(notaLines, MX, y);
+                y += notaLines.length * 11 + 16;
+
+                // ---- FUNCIÓN PARA RENDERIZAR UNA SECCIÓN DE INDICADORES ----
+                function renderSeccion(titulo, indicadores) {{
+                    checkPage(60);
+                    // título de sección
+                    doc.setFillColor(230, 232, 241);
+                    doc.rect(MX, y, MAXW, 24, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(12);
+                    doc.setTextColor(C_AZUL[0], C_AZUL[1], C_AZUL[2]);
+                    doc.text(titulo, MX + 10, y + 16);
+                    y += 34;
+
+                    // Geometría de la tabla de 2 columnas: Métrica | Resultado
+                    const COL1 = Math.round(MAXW * 0.58);   // ancho columna "Métrica"
+                    const COL2 = MAXW - COL1;                 // ancho columna "Resultado"
+                    const ROW_H = 18;                         // alto de fila
+                    const PADX = 8;
+
+                    indicadores.forEach(ind => {{
+                        const a = _analizarIndicador(ind, iniIdx, finIdx, periodos);
+                        if (!a) return;
+
+                        // Construir las filas (métrica, resultado) de este indicador
+                        const filas = [];
+                        filas.push(['Valor de cierre (' + (periodos[a.idxAct] ? periodos[a.idxAct].largo : '') + ')', a.valActual]);
+                        if (a.varMes !== null) {{
+                            filas.push(['Variación vs período anterior', a.varMes]);
+                        }}
+                        if (a.varAnio !== null) {{
+                            filas.push(['Variación interanual (vs año anterior)', a.varAnio]);
+                        }}
+                        filas.push(['Tendencia en el rango', _capitaliza(a.tendencia)]);
+                        if (a.minV !== null && a.minIdx >= 0) {{
+                            filas.push(['Mínimo del rango', a.minV + '  (' + (periodos[a.minIdx] ? periodos[a.minIdx].largo : '') + ')']);
+                        }}
+                        if (a.maxV !== null && a.maxIdx >= 0) {{
+                            filas.push(['Máximo del rango', a.maxV + '  (' + (periodos[a.maxIdx] ? periodos[a.maxIdx].largo : '') + ')']);
+                        }}
+
+                        // Altura total del bloque: título indicador + cabecera tabla + filas
+                        const alturaBloque = 22 + ROW_H + filas.length * ROW_H + 16;
+                        checkPage(alturaBloque);
+
+                        // --- Nombre del indicador ---
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(12);
+                        doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                        doc.text(a.nombre, MX, y);
+                        y += 10;
+
+                        // --- Cabecera de la tabla: Métrica | Resultado ---
+                        doc.setFillColor(C_AZUL[0], C_AZUL[1], C_AZUL[2]);
+                        doc.rect(MX, y, COL1, ROW_H, 'F');
+                        doc.rect(MX + COL1, y, COL2, ROW_H, 'F');
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(12);
+                        doc.setTextColor(255, 255, 255);
+                        doc.text('Métrica', MX + PADX, y + 13);
+                        doc.text('Resultado', MX + COL1 + PADX, y + 13);
+                        y += ROW_H;
+
+                        // --- Filas de la tabla ---
+                        doc.setFontSize(12);
+                        filas.forEach((f, i) => {{
+                            // fondo alterno (zebra)
+                            if (i % 2 === 0) {{
+                                doc.setFillColor(245, 247, 250);
+                                doc.rect(MX, y, MAXW, ROW_H, 'F');
+                            }}
+                            // texto métrica
+                            doc.setFont('helvetica', 'normal');
+                            doc.setTextColor(70, 75, 70);
+                            doc.text(f[0], MX + PADX, y + 13);
+                            // texto resultado (en negrita)
+                            doc.setFont('helvetica', 'bold');
+                            doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                            doc.text(String(f[1]), MX + COL1 + PADX, y + 13);
+                            y += ROW_H;
+                        }});
+
+                        // --- Bordes de la tabla ---
+                        const filasTotal = filas.length + 1; // +cabecera
+                        const topTabla = y - filasTotal * ROW_H;
+                        doc.setDrawColor(214, 219, 227);
+                        doc.setLineWidth(0.5);
+                        // marco exterior
+                        doc.rect(MX, topTabla, MAXW, filasTotal * ROW_H);
+                        // línea divisoria de columnas
+                        doc.line(MX + COL1, topTabla, MX + COL1, topTabla + filasTotal * ROW_H);
+
+                        y += 16;
+                    }});
+                    y += 4;
+                }}
+
+                // ---- RESUMEN EJECUTIVO ----
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(14);
+                doc.setTextColor(C_OSCURO[0], C_OSCURO[1], C_OSCURO[2]);
+                doc.text('Resumen del período', MX, y);
+                y += 20;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(70, 75, 70);
+                const resumen = 'El presente informe describe la evolución de los indicadores del tablero principal entre ' +
+                    pIni + ' y ' + pFin + '. A continuación se detalla, para cada indicador, su valor de cierre, ' +
+                    'la variación respecto al período anterior, la comparación interanual cuando hay datos disponibles, ' +
+                    'y la tendencia observada en el rango seleccionado.';
+                const resLines = doc.splitTextToSize(resumen, MAXW);
+                doc.text(resLines, MX, y, {{ lineHeightFactor: 1.4 }});
+                y += resLines.length * 16 + 22;
+
+                // ---- SECCIONES ----
+                renderSeccion('Indicadores en porcentaje (razones financieras)', data.filasPct);
+                renderSeccion('Estructura financiera y resultados (millones COP)', data.filasMoney);
+
+                pieDePagina();
+
+                // ---- GUARDAR ----
+                const nombreArchivo = 'Informe_Indicadores_' +
+                    periodos[finIdx].corto.replace('-', '') + '.pdf';
+                doc.save(nombreArchivo);
+
+            }} catch (err) {{
+                console.error('Error generando informe PDF:', err);
+                alert('Ocurrió un error al generar el informe. Revisa la consola para más detalle.');
+            }} finally {{
+                btn.disabled = false;
+                btn.querySelector('span').textContent = textoOrig;
+            }}
+        }}
+
         function construirTableroResumen() {{
             // Etiquetas de períodos (tomadas de DATOS_MOROSIDAD que tiene los 60)
             const periodos = DATOS_MOROSIDAD.map(r => ({{
@@ -16436,39 +18740,39 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             // serie: array · fmt · unidad ('pts'|'pb'|'%') · modo neón · invertir · varDesdeFebrero
             const FILAS_PCT = [
                 {{ seccion: 'Solvencia y Liquidez' }},
-                {{ nombre: 'Solvencia', modulo: 'Solvencia', serie: SERIE_SOLVENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#15803d', click: 'abrirSolvencia' }},
+                {{ nombre: 'Solvencia', modulo: 'Solvencia', serie: SERIE_SOLVENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#17A53D', click: 'abrirSolvencia' }},
                 {{ seccion: 'Calidad de Cartera' }},
-                {{ nombre: 'Índice de Mora', modulo: 'Activo · Mora', serie: SERIE_INDICE_MORA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#dc2626', click: 'abrirIndiceMora' }},
-                {{ nombre: 'Calidad de Cartera', modulo: 'Activo · Riesgo', serie: SERIE_CALIDAD_CARTERA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#1e40af', click: 'abrirIndiceRiesgo' }},
-                {{ nombre: 'Cobertura', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_TOTAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#0d9488', click: 'abrirCobertura' }},
-                {{ nombre: 'Cobertura c/Prov. Gral', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_CON_GRAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#115e59', click: 'abrirCobertura' }},
+                {{ nombre: 'Índice de Mora', modulo: 'Activo · Mora', serie: SERIE_INDICE_MORA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#C91A15', click: 'abrirIndiceMora' }},
+                {{ nombre: 'Calidad de Cartera', modulo: 'Activo · Riesgo', serie: SERIE_CALIDAD_CARTERA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#045988', click: 'abrirIndiceRiesgo' }},
+                {{ nombre: 'Cobertura', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_TOTAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#36BAA8', click: 'abrirCobertura' }},
+                {{ nombre: 'Cobertura c/Prov. Gral', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_CON_GRAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#237C70', click: 'abrirCobertura' }},
                 {{ seccion: 'Rentabilidad' }},
-                {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#0891b2', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#0d9488', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#6d28d9', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Eficiencia', modulo: 'Gastos / Ingresos', serie: SERIE_EFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, varDesdeFebrero: true, punto: '#c2410c', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F78502', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#A75A00', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F6A141', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Eficiencia', modulo: 'Gastos / Ingresos', serie: SERIE_EFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, varDesdeFebrero: true, punto: '#CC6A02', click: 'abrirEvolucionICG' }},
             ];
             
             const FILAS_MONEY = [
                 {{ seccion: 'Estructura — Activo' }},
-                {{ nombre: 'Activo', modulo: 'Activo', serie: SERIE_EVOLUCION_ACTIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#06b6d4', punto: '#06b6d4', click: 'abrirEvolucionActivo' }},
-                {{ nombre: 'Cartera Total', modulo: 'Activo · Mora', serie: SERIE_CARTERA_TOTAL, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0ea5e9', punto: '#0ea5e9', click: 'abrirIndiceMora' }},
-                {{ nombre: 'Cartera de Créditos', modulo: 'Activo · Cuenta 14', serie: SERIE_CARTERA_14, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0284c7', punto: '#0284c7', click: 'abrirEvolucionActivo' }},
-                {{ nombre: 'Efectivo y Equivalente', modulo: 'Activo · Cuenta 11', serie: SERIE_EFECTIVO_11, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#06b6d4', punto: '#06b6d4', click: 'abrirEvolucionActivo' }},
-                {{ nombre: 'Inversiones', modulo: 'Activo · Cuenta 12', serie: SERIE_INVERSIONES_12, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0891b2', punto: '#0891b2', click: 'abrirEvolucionActivo' }},
-                {{ nombre: 'Cuentas por Cobrar', modulo: 'Activo · Cuenta 16', serie: SERIE_CXC_16, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#155e75', punto: '#155e75', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Activo', modulo: 'Activo', serie: SERIE_EVOLUCION_ACTIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#36BAA8', punto: '#36BAA8', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Cartera Total', modulo: 'Activo · Mora', serie: SERIE_CARTERA_TOTAL, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#088DD5', punto: '#088DD5', click: 'abrirIndiceMora' }},
+                {{ nombre: 'Cartera de Créditos', modulo: 'Activo · Cuenta 14', serie: SERIE_CARTERA_14, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Efectivo y Equivalente', modulo: 'Activo · Cuenta 11', serie: SERIE_EFECTIVO_11, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#36BAA8', punto: '#36BAA8', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Inversiones', modulo: 'Activo · Cuenta 12', serie: SERIE_INVERSIONES_12, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#2CAAEE', punto: '#2CAAEE', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Cuentas por Cobrar', modulo: 'Activo · Cuenta 16', serie: SERIE_CXC_16, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#237C70', punto: '#237C70', click: 'abrirEvolucionActivo' }},
                 {{ seccion: 'Estructura — Pasivo' }},
-                {{ nombre: 'Pasivo', modulo: 'Pasivo', serie: SERIE_EVOLUCION_PASIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#f59e0b', punto: '#f59e0b', click: 'abrirEvolucionPasivo' }},
-                {{ nombre: 'Depósitos', modulo: 'Pasivo · Cuenta 21', serie: SERIE_DEPOSITOS_21, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#d97706', punto: '#d97706', click: 'abrirEvolucionPasivo' }},
+                {{ nombre: 'Pasivo', modulo: 'Pasivo', serie: SERIE_EVOLUCION_PASIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#088DD5', punto: '#088DD5', click: 'abrirEvolucionPasivo' }},
+                {{ nombre: 'Depósitos', modulo: 'Pasivo · Cuenta 21', serie: SERIE_DEPOSITOS_21, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirEvolucionPasivo' }},
                 {{ seccion: 'Estructura — Patrimonio' }},
-                {{ nombre: 'Patrimonio', modulo: 'Patrimonio', serie: SERIE_EVOLUCION_PATRIMONIO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#8b5cf6', punto: '#8b5cf6', click: 'abrirEvolucionPatrimonio' }},
-                {{ nombre: 'Capital Social', modulo: 'Patrimonio · Cuenta 31', serie: SERIE_CAPITAL_31, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#7c3aed', punto: '#7c3aed', click: 'abrirEvolucionPatrimonio' }},
-                {{ nombre: 'Reservas', modulo: 'Patrimonio · Cuenta 32', serie: SERIE_RESERVAS_32, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#6d28d9', punto: '#6d28d9', click: 'abrirEvolucionPatrimonio' }},
+                {{ nombre: 'Patrimonio', modulo: 'Patrimonio', serie: SERIE_EVOLUCION_PATRIMONIO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#6039A3', punto: '#6039A3', click: 'abrirEvolucionPatrimonio' }},
+                {{ nombre: 'Capital Social', modulo: 'Patrimonio · Cuenta 31', serie: SERIE_CAPITAL_31, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#7F5ABF', punto: '#7F5ABF', click: 'abrirEvolucionPatrimonio' }},
+                {{ nombre: 'Reservas', modulo: 'Patrimonio · Cuenta 32', serie: SERIE_RESERVAS_32, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#3C2367', punto: '#3C2367', click: 'abrirEvolucionPatrimonio' }},
                 {{ seccion: 'Estado de Resultados' }},
-                {{ nombre: 'Ingresos', modulo: 'Ingresos', serie: SERIE_ICG_INGRESOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#15803d', punto: '#15803d', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Costos', modulo: 'Ingresos', serie: SERIE_ICG_COSTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#c2410c', punto: '#c2410c', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Gastos', modulo: 'Ingresos', serie: SERIE_ICG_GASTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#dc2626', punto: '#dc2626', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Excedente', modulo: 'Ingresos', serie: SERIE_ICG_EXCEDENTE, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#6d28d9', punto: '#6d28d9', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Ingresos', modulo: 'Ingresos', serie: SERIE_ICG_INGRESOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#17A53D', punto: '#17A53D', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Costos', modulo: 'Ingresos', serie: SERIE_ICG_COSTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#A75A00', punto: '#A75A00', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Gastos', modulo: 'Ingresos', serie: SERIE_ICG_GASTOS, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: true, varDesdeFebrero: true, baseHex: '#C91A15', punto: '#C91A15', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Excedente', modulo: 'Ingresos', serie: SERIE_ICG_EXCEDENTE, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, varDesdeFebrero: true, baseHex: '#F78502', punto: '#F78502', click: 'abrirEvolucionICG' }},
             ];
             
             // ===== Construye una tabla matriz dado el array de filas =====
@@ -16539,6 +18843,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             construirMatriz('matriz-pct-tabla', FILAS_PCT);
             construirMatriz('matriz-money-tabla', FILAS_MONEY);
             
+            // ===== Exponer datos del tablero para el generador de informe PDF =====
+            // Guardamos períodos y, por cada indicador, su nombre/módulo/serie/unidad/modo.
+            // (Se omiten las funciones fmt; el generador formatea por su cuenta.)
+            window.TABLERO_DATA = {{
+                periodos: periodos,
+                filasPct: FILAS_PCT.filter(f => !f.seccion).map(f => ({{
+                    nombre: f.nombre, modulo: f.modulo, serie: f.serie,
+                    unidad: f.unidad, modo: f.modo, invertir: !!f.invertir,
+                    varDesdeFebrero: !!f.varDesdeFebrero, esPorcentaje: true
+                }})),
+                filasMoney: FILAS_MONEY.filter(f => !f.seccion).map(f => ({{
+                    nombre: f.nombre, modulo: f.modulo, serie: f.serie,
+                    unidad: f.unidad, modo: f.modo, invertir: !!f.invertir,
+                    varDesdeFebrero: !!f.varDesdeFebrero, esPorcentaje: false
+                }})),
+                seccionesPct: FILAS_PCT.map(f => f.seccion ? {{seccion: f.seccion}} : {{nombre: f.nombre}}),
+                seccionesMoney: FILAS_MONEY.map(f => f.seccion ? {{seccion: f.seccion}} : {{nombre: f.nombre}})
+            }};
+            
+            // Poblar los selectores del panel de informe PDF
+            try {{ poblarSelectoresInforme(); }} catch(e) {{ console.error('Error selectores informe:', e); }}
+            
             // Auto-scroll al final (período más reciente) en ambas matrices
             setTimeout(() => {{
                 ['matriz-pct-scroll', 'matriz-money-scroll'].forEach(id => {{
@@ -16561,16 +18887,45 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     return ruta_salida
 
 
+def _cargar_jspdf() -> str:
+    """
+    Carga jsPDF (UMD minificado) como bloque <script> inline para PDF offline.
+    Busca en libs_extra/, luego en node_modules/, y por último cae a CDN.
+    """
+    from pathlib import Path
+    carpeta_script = Path(__file__).parent
+    candidatos = [
+        carpeta_script / "libs_extra" / "jspdf.umd.min.js",
+        carpeta_script / "node_modules" / "jspdf" / "dist" / "jspdf.umd.min.js",
+        carpeta_script / "libs" / "jspdf.umd.min.js",
+    ]
+    for fpath in candidatos:
+        try:
+            if fpath.exists():
+                contenido = fpath.read_text(encoding="utf-8")
+                print(f"   OK: jsPDF embebido desde {fpath.parent.name}/ ({len(contenido) // 1024} KB)")
+                return f"<!-- jsPDF embebido -->\n<script>\n{contenido}\n</script>"
+        except Exception:
+            continue
+    print("   ATENCION: jsPDF no encontrado localmente. Usando CDN (requiere internet).")
+    return '<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>'
+
+
 def _cargar_librerias_js() -> str:
     """
     Lee las librerías JavaScript de la subcarpeta 'libs/' y las devuelve
-    como bloques <script> listos para insertar en el HTML.
+    como bloques <script> listos para insertar en el HTML. Incluye jsPDF
+    para la generación de informes en PDF offline.
     
     Si las librerías no se encuentran, intenta extraerlas desde el bundle
     embebido al final de este script (___LIBS_BUNDLE___).
     
     Si tampoco hay bundle, cae al modo CDN (requiere internet).
     """
+    return _cargar_librerias_js_base() + "\n" + _cargar_jspdf()
+
+
+def _cargar_librerias_js_base() -> str:
     from pathlib import Path
     
     carpeta_script = Path(__file__).parent
@@ -16811,6 +19166,14 @@ def main():
         if i % 10 == 0 or i == n_total:
             print(f"   ... {i}/{n_total} calculados ({ricg['periodo']})")
     
+    print(f"\nCalculando Crecimiento de Depositos para los {n_total} periodos...")
+    todos_depositos = []
+    for i, (anio, mes) in enumerate(periodos, 1):
+        rd = calcular_crecimiento_depositos(df, anio, mes)
+        todos_depositos.append(rd)
+        if i % 10 == 0 or i == n_total:
+            print(f"   ... {i}/{n_total} calculados ({rd['periodo']})")
+    
     r = todos_resultados[-1]
     rm = todos_morosidad[-1]
     rr = todos_riesgo[-1]
@@ -16846,6 +19209,7 @@ def main():
                  todos_evolucion_pasivo=todos_evolucion_pasivo,
                  todos_evolucion_patrimonio=todos_evolucion_patrimonio,
                  todos_icg=todos_icg,
+                 todos_depositos=todos_depositos,
                  catalogo_cuentas=catalogo_cuentas)
     print(f"   OK: {ruta_html.name}")
     
