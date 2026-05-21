@@ -1458,6 +1458,13 @@ DEPOSITOS_PRODUCTOS = [
             {"codigo": "210505001", "nombre": "Depósitos de Ahorro Voluntario"},
             {"codigo": "210505002", "nombre": "Bolsillo Rentable"},
         ],
+        # Componentes que se muestran SEPARADOS en la vista "Saldo Capital"
+        # (sus saldos son capital puro atribuible). En "Saldo Total" van unidos
+        # porque el interés (210595) está en cuenta compartida, no atribuible.
+        "componentes_capital": [
+            {"id": "ahorro_voluntario", "nombre": "Ahorro Voluntario", "cuenta": "210505001"},
+            {"id": "bolsillo_rentable",  "nombre": "Bolsillo Rentable",  "cuenta": "210505002"},
+        ],
     },
     {
         "id": "cdat", "nombre": "CDAT",
@@ -1519,6 +1526,18 @@ def calcular_crecimiento_depositos(df: pd.DataFrame, anio: int, mes: str) -> dic
         crec_total = ((total_act / total_aa) - 1) if total_aa > 0 else None
         crec_capital = ((capital_act / capital_aa) - 1) if capital_aa > 0 else None
 
+        # Componentes desagregados para la vista "Saldo Capital"
+        componentes = []
+        for comp in prod.get("componentes_capital", []):
+            saldo_comp = saldo_cuenta(anio, mes, comp["cuenta"])
+            saldo_comp_aa = saldo_cuenta(anio_anterior, mes, comp["cuenta"])
+            crec_comp = ((saldo_comp / saldo_comp_aa) - 1) if saldo_comp_aa > 0 else None
+            componentes.append({
+                "id": comp["id"], "nombre": comp["nombre"], "cuenta": comp["cuenta"],
+                "saldo_capital": saldo_comp, "saldo_capital_aa": saldo_comp_aa,
+                "crecimiento_capital": crec_comp,
+            })
+
         productos.append({
             "id": prod["id"], "nombre": prod["nombre"],
             "cuenta_total": prod["cuenta_total"], "cuenta_interes": prod["cuenta_interes"],
@@ -1526,6 +1545,7 @@ def calcular_crecimiento_depositos(df: pd.DataFrame, anio: int, mes: str) -> dic
             "saldo_total_aa": total_aa, "saldo_capital_aa": capital_aa,
             "crecimiento_total": crec_total, "crecimiento_capital": crec_capital,
             "discriminado": disc,
+            "componentes_capital": componentes,
         })
         total_general_total += total_act
         total_general_capital += capital_act
@@ -1870,6 +1890,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                  todos_evolucion_patrimonio: list = None,
                  todos_icg: list = None,
                  todos_depositos: list = None,
+                 series_indicadores: list = None,
                  catalogo_cuentas: dict = None) -> str:
     """Genera el archivo HTML del dashboard interactivo."""
     datos_json = [_resultado_a_json(r) for r in todos_resultados]
@@ -1909,6 +1930,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     # Datos de Ingresos, Costos y Gastos
     if todos_icg is None: todos_icg = []
     icg_json = todos_icg
+    
+    if series_indicadores is None: series_indicadores = []
     
     # Catálogo de cuentas PUC para reportes auditables
     if catalogo_cuentas is None:
@@ -1990,37 +2013,44 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             /* ===== Botón flotante volver al inicio ===== */
             #btn-inicio-flotante {{
                 position: fixed;
-                top: 18px;
-                right: 18px;
+                top: 22px;
+                right: 26px;
                 z-index: 9999;
                 display: inline-flex;
                 align-items: center;
-                gap: 7px;
-                padding: 10px 16px 10px 13px;
-                background: rgba(255,255,255,0.92);
-                backdrop-filter: blur(10px);
-                -webkit-backdrop-filter: blur(10px);
-                border: 1.5px solid #d7ddd5;
+                gap: 11px;
+                padding: 18px 32px 18px 26px;
+                background: linear-gradient(135deg, #1FC04A 0%, #17A53D 45%, #0C7A2C 100%);
+                border: none;
                 border-radius: 999px;
-                color: #17A53D;
+                color: #ffffff;
                 font-family: 'Poppins', sans-serif;
-                font-size: 13px;
-                font-weight: 700;
+                font-size: 17px;
+                font-weight: 800;
+                letter-spacing: 0.4px;
                 cursor: pointer;
-                box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-                transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
+                box-shadow: 0 8px 26px rgba(12,122,44,0.48), 0 3px 8px rgba(0,0,0,0.14);
+                transition: all 0.28s cubic-bezier(0.34,1.56,0.64,1);
+                animation: btnInicioPulse 2.6s ease-in-out infinite;
             }}
             #btn-inicio-flotante svg {{
-                width: 18px;
-                height: 18px;
+                width: 25px;
+                height: 25px;
                 flex-shrink: 0;
             }}
             #btn-inicio-flotante:hover {{
-                background: #17A53D;
-                border-color: #17A53D;
-                color: #ffffff;
-                transform: translateY(-2px) scale(1.04);
-                box-shadow: 0 8px 24px rgba(21,128,61,0.35);
+                background: linear-gradient(135deg, #2BD659 0%, #1FC04A 45%, #11782C 100%);
+                transform: translateY(-4px) scale(1.10);
+                box-shadow: 0 16px 40px rgba(31,192,74,0.60), 0 6px 14px rgba(0,0,0,0.20);
+                animation: none;
+            }}
+            #btn-inicio-flotante:active {{
+                transform: translateY(-1px) scale(1.03);
+            }}
+            /* Pulso (anillo) llamativo para destacar como botón principal */
+            @keyframes btnInicioPulse {{
+                0%, 100% {{ box-shadow: 0 8px 26px rgba(12,122,44,0.48), 0 3px 8px rgba(0,0,0,0.14), 0 0 0 0 rgba(31,192,74,0.45); }}
+                50% {{ box-shadow: 0 8px 30px rgba(31,192,74,0.62), 0 3px 8px rgba(0,0,0,0.14), 0 0 0 12px rgba(31,192,74,0.0); }}
             }}
             /* Oculto cuando estás en el menú principal */
             body.en-inicio #btn-inicio-flotante {{
@@ -2028,7 +2058,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             @media (max-width: 640px) {{
                 #btn-inicio-flotante span {{ display: none; }}
-                #btn-inicio-flotante {{ padding: 11px; }}
+                #btn-inicio-flotante {{ padding: 16px; }}
+                #btn-inicio-flotante svg {{ width: 24px; height: 24px; }}
             }}
             
             :root {{
@@ -2367,8 +2398,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 stroke-linecap: butt;
             }}
             .gauge-zone-red {{ stroke: #C91A15; }}
+            .gauge-zone-orange {{ stroke: #F77F00; }}
             .gauge-zone-yellow {{ stroke: #FBDA03; }}
             .gauge-zone-green {{ stroke: #26D354; }}
+            .gauge-zone-green-light {{ stroke: #5FD97E; }}
             .gauge-zone-green-dark {{ stroke: #17A53D; }}
             
             .gauge-needle-line {{
@@ -2409,8 +2442,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 transition: fill 0.5s;
             }}
             .gauge-center-value.zona-rojo {{ fill: #C91A15; }}
+            .gauge-center-value.zona-naranja {{ fill: #F77F00; }}
             .gauge-center-value.zona-amarillo {{ fill: #E2C403; }}
             .gauge-center-value.zona-verde {{ fill: #26D354; }}
+            .gauge-center-value.zona-verde-light {{ fill: #3DAE5C; }}
             .gauge-center-value.zona-verde-dark {{ fill: #17A53D; }}
             
             .gauge-status {{
@@ -4473,17 +4508,35 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             /* Separador de sección temática dentro de la matriz */
             .matriz-seccion-row td {{
-                background: transparent;
-                color: #94a3b8;
-                font-size: 10px;
-                font-weight: 700;
+                background: linear-gradient(90deg, #f1f5f9 0%, #f8fafc 100%);
+                color: #475569;
+                font-size: 11px;
+                font-weight: 800;
                 text-transform: uppercase;
-                letter-spacing: 1.2px;
-                padding: 12px 6px 4px;
+                letter-spacing: 1px;
+                padding: 11px 10px;
                 text-align: left;
                 position: sticky;
                 left: 0;
+                border-radius: 8px;
             }}
+            .matriz-seccion-toggle {{ cursor: pointer; user-select: none; }}
+            .matriz-seccion-toggle:hover td {{
+                background: linear-gradient(90deg, #e2e8f0 0%, #eef2f7 100%);
+                color: #1e293b;
+            }}
+            .matriz-seccion-chevron {{
+                display: inline-block;
+                margin-right: 8px;
+                font-size: 9px;
+                color: #64748b;
+                transition: transform 0.25s ease;
+                transform: rotate(0deg);
+            }}
+            .matriz-seccion-toggle.colapsada .matriz-seccion-chevron {{
+                transform: rotate(-90deg);
+            }}
+            .matriz-seccion-nombre {{ vertical-align: middle; }}
             
             @media (max-width: 768px) {{
                 .matriz-tabla .col-indicador {{ min-width: 150px; max-width: 150px; }}
@@ -5715,6 +5768,59 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             @media (max-width: 760px) {{
                 .dep-grid-2x2 {{ grid-template-columns: 1fr; }}
             }}
+            /* ===== Etiquetas integradas en la esquina de cada gráfico ===== */
+            /* Sin sombras, bordes ni degradados: solo texto limpio y compacto. */
+            .dep-chart-box {{
+                position: relative;
+            }}
+            .dep-chart-tag {{
+                position: absolute;
+                top: 2px;
+                right: 8px;
+                z-index: 5;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 1px;
+                pointer-events: none;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }}
+            .dep-tag-nombre {{
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+                text-transform: uppercase;
+                color: #6b7268;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }}
+            .dep-tag-punto {{
+                width: 9px; height: 9px; border-radius: 50%;
+                flex: 0 0 auto;
+            }}
+            .dep-tag-valor {{
+                font-size: 20px;
+                font-weight: 800;
+                letter-spacing: -0.3px;
+                line-height: 1.05;
+                font-family: 'JetBrains Mono', monospace;
+            }}
+            .dep-tag-var {{
+                font-size: 11px;
+                font-weight: 700;
+                font-style: italic;
+                margin-top: 1px;
+            }}
+            .dep-tag-var.sube {{ color: #11782C; }}
+            .dep-tag-var.baja {{ color: #C91A15; }}
+            .dep-tag-var.igual {{ color: #6b7268; }}
+            /* Etiqueta compacta para los mini-gráficos */
+            .dep-mini-tag .dep-tag-valor {{ font-size: 15px; }}
+            .dep-mini-tag .dep-tag-nombre {{ font-size: 10px; }}
+            .dep-mini-tag .dep-tag-var {{ font-size: 10px; }}
             .historico-eje-fijo {{
                 flex: 0 0 80px;
                 width: 80px;
@@ -6120,7 +6226,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     <body>
         
         <!-- ========== BOTÓN FLOTANTE: VOLVER AL INICIO ========== -->
-        <button id="btn-inicio-flotante" onclick="volverAlMenu()" title="Volver a la página principal" aria-label="Inicio">
+        <button id="btn-inicio-flotante" onclick="volverAlMenuPrincipal()" title="Ir al menú principal" aria-label="Inicio">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 9.5L12 3l9 6.5"/>
                 <path d="M5 9.5V21h14V9.5"/>
@@ -6278,10 +6384,6 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         <!-- ========== SUBMENU MÓDULO ACTIVO ========== -->
         <div class="menu-principal oculto" id="submenu-activo">
             <div class="menu-header">
-                <button class="btn-menu" onclick="volverAlMenuPrincipal()" style="margin-bottom: 18px;">
-                    <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                    <span>Volver al menú principal</span>
-                </button>
                 <h1 style="color: #237C70;">Módulo Activo</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
@@ -6378,16 +6480,30 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                 </div>
                 
+                <!-- CARTERA SOBRE ACTIVO -->
+                <div class="modulo-card modulo-evolucion-activo" onclick="abrirCarteraActivo()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 3v18h18"/>
+                            <rect x="7" y="11" width="3" height="6"/>
+                            <rect x="13" y="7" width="3" height="10"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Cartera sobre Activo</h3>
+                    <p class="modulo-descripcion">Cartera sobre el Activo total (cuenta 1). Alterna entre Cartera de Créditos y Cartera Total.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
             </div>
         </div>
         
         <!-- ========== SUBMENU MÓDULO PASIVO ========== -->
         <div class="menu-principal oculto" id="submenu-pasivo">
             <div class="menu-header">
-                <button class="btn-menu" onclick="volverAlMenuPrincipal()" style="margin-bottom: 18px;">
-                    <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                    <span>Volver al menú principal</span>
-                </button>
                 <h1 style="color: #045988;">Módulo Pasivo</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
@@ -6422,6 +6538,41 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </div>
                     <h3 class="modulo-titulo">Crecimiento de Depósitos</h3>
                     <p class="modulo-descripcion">Captaciones por producto: Ahorro a la Vista, CDAT, Contractual y DAES, con crecimiento mensual.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- DEPÓSITOS SOBRE PASIVO -->
+                <div class="modulo-card modulo-evolucion-pasivo" onclick="abrirDepositosPasivo()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 3v18h18"/>
+                            <path d="M7 14l4-4 3 3 5-6"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Depósitos sobre Pasivo</h3>
+                    <p class="modulo-descripcion">Depósitos (cuenta 21) sobre el Pasivo total (cuenta 2).</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+                
+                <!-- DEPÓSITOS SOBRE CARTERA -->
+                <div class="modulo-card modulo-evolucion-pasivo" onclick="abrirDepositosCartera()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M3 3v18h18"/>
+                            <circle cx="9" cy="14" r="3"/>
+                            <path d="M14 7l5 5"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">Depósitos sobre Cartera</h3>
+                    <p class="modulo-descripcion">Depósitos (cuenta 21) sobre la Cartera. Alterna entre Cartera de Créditos y Cartera Total.</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -6467,84 +6618,31 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 </div>
             </div>
             
-            <!-- KPIs -->
-            <div class="dep-total-cards" id="depositos-kpis"></div>
-            
-            <!-- Gráfico histórico TOTAL (grande) -->
+            <!-- Gráfico histórico TOTAL (grande) con etiqueta integrada -->
             <div class="section acc-graficos">
                 <h2 class="section-title">Evolución Histórica de Depósitos</h2>
                 <p class="seccion-subtitulo" id="depositos-graf-sub">Saldo total de captaciones · Millones COP</p>
-                <div class="historico-flex-wrap">
-                    <div class="historico-eje-fijo">
-                        <div id="chartDepositosTotal-axis-container" class="eje-y-html-container"></div>
-                    </div>
-                    <div class="chart-scroll-container" id="depositosTotal-scroll-container">
-                        <div class="chart-inner" id="depositosTotal-inner">
-                            <canvas id="chartDepositosTotal"></canvas>
+                <div class="dep-chart-box">
+                    <div class="dep-chart-tag" id="dep-tag-total"></div>
+                    <div class="historico-flex-wrap">
+                        <div class="historico-eje-fijo">
+                            <div id="chartDepositosTotal-axis-container" class="eje-y-html-container"></div>
+                        </div>
+                        <div class="chart-scroll-container" id="depositosTotal-scroll-container">
+                            <div class="chart-inner" id="depositosTotal-inner">
+                                <canvas id="chartDepositosTotal"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>
                 <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
             </div>
             
-            <!-- Cuadrícula 2x2: un gráfico por producto -->
+            <!-- Cuadrícula dinámica: un gráfico por producto (4 en Total, 5 en Capital) -->
             <div class="section acc-graficos">
                 <h2 class="section-title">Evolución por Producto</h2>
                 <p class="seccion-subtitulo">Saldo histórico de cada producto de captación · Millones COP</p>
-                <div class="dep-grid-2x2">
-                    <div class="dep-mini-card">
-                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-ahorro_vista"></span>Ahorro a la Vista</div>
-                        <div class="historico-flex-wrap">
-                            <div class="historico-eje-fijo historico-eje-fijo-small">
-                                <div id="chartDep-ahorro_vista-axis-container" class="eje-y-html-container"></div>
-                            </div>
-                            <div class="chart-scroll-container" id="dep-ahorro_vista-scroll-container">
-                                <div class="chart-inner dep-mini-inner" id="dep-ahorro_vista-inner">
-                                    <canvas id="chartDep-ahorro_vista"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="dep-mini-card">
-                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-cdat"></span>CDAT</div>
-                        <div class="historico-flex-wrap">
-                            <div class="historico-eje-fijo historico-eje-fijo-small">
-                                <div id="chartDep-cdat-axis-container" class="eje-y-html-container"></div>
-                            </div>
-                            <div class="chart-scroll-container" id="dep-cdat-scroll-container">
-                                <div class="chart-inner dep-mini-inner" id="dep-cdat-inner">
-                                    <canvas id="chartDep-cdat"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="dep-mini-card">
-                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-contractual"></span>Ahorro Contractual</div>
-                        <div class="historico-flex-wrap">
-                            <div class="historico-eje-fijo historico-eje-fijo-small">
-                                <div id="chartDep-contractual-axis-container" class="eje-y-html-container"></div>
-                            </div>
-                            <div class="chart-scroll-container" id="dep-contractual-scroll-container">
-                                <div class="chart-inner dep-mini-inner" id="dep-contractual-inner">
-                                    <canvas id="chartDep-contractual"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="dep-mini-card">
-                        <div class="dep-mini-titulo"><span class="dep-mini-punto" id="dep-mini-punto-daes"></span>DAES</div>
-                        <div class="historico-flex-wrap">
-                            <div class="historico-eje-fijo historico-eje-fijo-small">
-                                <div id="chartDep-daes-axis-container" class="eje-y-html-container"></div>
-                            </div>
-                            <div class="chart-scroll-container" id="dep-daes-scroll-container">
-                                <div class="chart-inner dep-mini-inner" id="dep-daes-inner">
-                                    <canvas id="chartDep-daes"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="dep-grid-2x2" id="depositos-grid-productos"></div>
                 <div class="chart-hint">Cada gráfico se desplaza por los períodos con su barra inferior</div>
             </div>
             
@@ -6561,10 +6659,6 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         <!-- ========== SUBMENU MÓDULO PATRIMONIO ========== -->
         <div class="menu-principal oculto" id="submenu-patrimonio">
             <div class="menu-header">
-                <button class="btn-menu" onclick="volverAlMenuPrincipal()" style="margin-bottom: 18px;">
-                    <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                    <span>Volver al menú principal</span>
-                </button>
                 <h1 style="color: #3C2367;">Módulo Patrimonio</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
@@ -6644,10 +6738,6 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         <!-- ========== SUBMENU MÓDULO INGRESOS, COSTOS Y GASTOS ========== -->
         <div class="menu-principal oculto" id="submenu-ingresos">
             <div class="menu-header">
-                <button class="btn-menu" onclick="volverAlMenuPrincipal()" style="margin-bottom: 18px;">
-                    <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                    <span>Volver al menú principal</span>
-                </button>
                 <h1 style="color: #11782C;">Módulo Ingresos, Costos y Gastos</h1>
                 <p class="subtitle">Selecciona el indicador que deseas analizar</p>
             </div>
@@ -6673,24 +6763,33 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 </div>
                 
                 <!-- INDICADORES DE RENTABILIDAD -->
-                <div class="modulo-card modulo-rentabilidad" onclick="abrirRentabilidad()">
+                
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirRendMn()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">Margen Neto</h3>
+                    <p class="modulo-descripcion">Excedente sobre los ingresos por ventas y recuperaciones (acumulado YTD).</p>
+                    <span class="modulo-accion">Abrir módulo <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span>
+                </div>
+                
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirMargenTotal()">
                     <span class="modulo-badge activo">Disponible</span>
                     <div class="modulo-icono">
                         <svg viewBox="0 0 24 24">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                            <path d="M2 17l10 5 10-5"/>
-                            <path d="M2 12l10 5 10-5"/>
+                            <path d="M3 3v18h18"/>
+                            <path d="M7 14l4-4 3 3 5-6"/>
                         </svg>
                     </div>
-                    <h3 class="modulo-titulo">Indicadores de Rentabilidad</h3>
-                    <p class="modulo-descripcion">ROE, Margen Neto y ROIC — rentabilidad anualizada del período sobre patrimonio, ventas y capital invertido.</p>
+                    <h3 class="modulo-titulo">Margen Total</h3>
+                    <p class="modulo-descripcion">Excedentes y/o pérdidas del ejercicio (cuenta 35) sobre los ingresos totales (cuenta 4).</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
                 
-                <!-- SUFICIENCIA DEL MARGEN FINANCIERO -->
                 <div class="modulo-card modulo-evolucion-icg" onclick="abrirSuficiencia()">
                     <span class="modulo-badge activo">Disponible</span>
                     <div class="modulo-icono">
@@ -6705,6 +6804,38 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
+                </div>
+                
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirRendRoe()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">ROE</h3>
+                    <p class="modulo-descripcion">Rentabilidad sobre Recursos Propios: excedente anualizado sobre el patrimonio promedio.</p>
+                    <span class="modulo-accion">Abrir módulo <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span>
+                </div>
+                
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirRendRoa()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">ROA</h3>
+                    <p class="modulo-descripcion">Rentabilidad sobre Activos: excedente anualizado sobre el activo promedio (cuenta 1).</p>
+                    <span class="modulo-accion">Abrir módulo <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span>
+                </div>
+                
+                <!-- SUFICIENCIA DEL MARGEN FINANCIERO -->
+                
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirRendRoic()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">ROIC</h3>
+                    <p class="modulo-descripcion">Rentabilidad sobre Capital Invertido: excedente sobre depósitos + obligaciones + patrimonio (promedios).</p>
+                    <span class="modulo-accion">Abrir módulo <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span>
                 </div>
             </div>
         </div>
@@ -8072,6 +8203,563 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </div>
                 </div>
             </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">(41 − 61) / (5105 + 5110 + 5115 + 5125 − 4225)</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Ingresos financieros (Cta 41)</span><span class="rent-comp-row-valor" id="smf-comp-41">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Costos financieros (Cta 61)</span><span class="rent-comp-row-valor" id="smf-comp-61">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Margen Financiero Bruto (41 − 61)</span><span class="rent-comp-row-valor" id="smf-comp-mfb">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Gastos operativos netos (5105+5110+5115+5125−4225)</span><span class="rent-comp-row-valor" id="smf-comp-gastos">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">Suficiencia del Margen Financiero</span><span class="rent-comp-row-valor" id="smf-comp-final">—</span></div>
+                </div>
+            </div>
+        </div>
+
+        
+        <!-- ========== MÓDULO: MARGEN TOTAL (35 / 4) ========== -->
+        <div class="container oculto" id="margen-total-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">Margen Total</h1>
+                    <div class="subtitle">Excedentes y/o pérdidas del ejercicio (cuenta 35) sobre los ingresos (cuenta 4)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card">
+                            <label for="margen-total-filtro-anio">Año</label>
+                            <select id="margen-total-filtro-anio"></select>
+                        </div>
+                        <div class="filtro-card">
+                            <label for="margen-total-filtro-mes">Mes</label>
+                            <select id="margen-total-filtro-mes"></select>
+                        </div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-margen-total" onclick="descargarExcelMargenTotal()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">Margen Total</div>
+                    <div class="evo-kpi-valor" id="margen-total-valor">—</div>
+                    <div class="evo-kpi-sub" id="margen-total-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Excedentes/Pérdidas (cuenta 35)</div>
+                    <div class="evo-kpi-valor" id="margen-total-num">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Ingresos (cuenta 4)</div>
+                    <div class="evo-kpi-valor" id="margen-total-den">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="margen-total-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="margen-total-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica del Margen Total</h2>
+                <p class="seccion-subtitulo">Excedentes y/o pérdidas ÷ Ingresos · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartMargenTotal-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="margen-total-scroll-container">
+                        <div class="chart-inner" id="margen-total-inner"><canvas id="chartMargenTotal"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle del Cálculo por Período</h2>
+                <p class="seccion-subtitulo">Componentes de la fórmula y margen resultante en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="margen-total-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="margen-total-tabla"></table>
+                    </div>
+                </div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">Excedentes y/o pérdidas (Cta 35) / Ingresos (Cta 4)</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Excedentes y/o pérdidas (Cta 35)</span><span class="rent-comp-row-valor" id="mgt-comp-num">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Ingresos (Cta 4)</span><span class="rent-comp-row-valor" id="mgt-comp-den">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">Margen Total</span><span class="rent-comp-row-valor" id="mgt-comp-final">—</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: CARTERA SOBRE ACTIVO (Cartera / 1) ========== -->
+        <div class="container oculto" id="cartera-activo-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-activo" onclick="volverAlSubmenuActivoDesdeCarteraActivo()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Activo</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#237C70;">Cartera sobre Activo</h1>
+                    <div class="subtitle">Cartera sobre el Activo total (cuenta 1)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="cobertura-toggle" id="cartera-activo-toggle">
+                        <span class="cobertura-toggle-titulo">TIPO DE CARTERA</span>
+                        <div class="cobertura-toggle-group">
+                            <button class="cobertura-toggle-btn activo" data-cart="creditos" onclick="cambiarCarteraCartActivo('creditos')">Cartera Créditos</button>
+                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraCartActivo('total')">Cartera Total</button>
+                        </div>
+                    </div>
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="cartera-activo-filtro-anio">Año</label><select id="cartera-activo-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="cartera-activo-filtro-mes">Mes</label><select id="cartera-activo-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-cartera-activo" onclick="descargarExcelCarteraActivo()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="gauge-card" style="max-width:420px;margin:0 auto 22px;">
+                <div class="gauge-label">Cartera sobre Activo</div>
+                <div class="gauge-periodo" id="cartera-activo-gauge-periodo">--</div>
+                <div class="gauge-wrapper" id="cartera-activo-gauge-wrapper"></div>
+            </div>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-evolucion-activo evo-kpi-principal">
+                    <div class="evo-kpi-label">Cartera sobre Activo</div>
+                    <div class="evo-kpi-valor" id="cartera-activo-valor">—</div>
+                    <div class="evo-kpi-sub" id="cartera-activo-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-evolucion-activo">
+                    <div class="evo-kpi-label" id="cartera-activo-num-label">Cartera</div>
+                    <div class="evo-kpi-valor" id="cartera-activo-num">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-evolucion-activo">
+                    <div class="evo-kpi-label">Activo Total (cuenta 1)</div>
+                    <div class="evo-kpi-valor" id="cartera-activo-den">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-evolucion-activo">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="cartera-activo-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="cartera-activo-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica de Cartera sobre Activo</h2>
+                <p class="seccion-subtitulo" id="cartera-activo-graf-sub">Cartera ÷ Activo · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartCarteraActivo-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container" id="cartera-activo-scroll-container">
+                        <div class="chart-inner" id="cartera-activo-inner"><canvas id="chartCarteraActivo"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle del Cálculo por Período</h2>
+                <p class="seccion-subtitulo">Componentes de la fórmula y resultado en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="cartera-activo-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="cartera-activo-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: DEPÓSITOS SOBRE PASIVO (21 / 2) ========== -->
+        <div class="container oculto" id="depositos-pasivo-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-pasivo" onclick="volverAlSubmenuPasivo()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Pasivo</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#045988;">Depósitos sobre Pasivo</h1>
+                    <div class="subtitle">Depósitos (cuenta 21) sobre el Pasivo total (cuenta 2)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="depositos-pasivo-filtro-anio">Año</label><select id="depositos-pasivo-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="depositos-pasivo-filtro-mes">Mes</label><select id="depositos-pasivo-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-depositos-pasivo" onclick="descargarExcelDepositosPasivo()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="gauge-card" style="max-width:420px;margin:0 auto 22px;">
+                <div class="gauge-label">Depósitos sobre Pasivo</div>
+                <div class="gauge-periodo" id="depositos-pasivo-gauge-periodo">--</div>
+                <div class="gauge-wrapper" id="depositos-pasivo-gauge-wrapper"></div>
+            </div>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-pasivo evo-kpi-principal">
+                    <div class="evo-kpi-label">Depósitos sobre Pasivo</div>
+                    <div class="evo-kpi-valor" id="depositos-pasivo-valor">—</div>
+                    <div class="evo-kpi-sub" id="depositos-pasivo-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label">Depósitos (cuenta 21)</div>
+                    <div class="evo-kpi-valor" id="depositos-pasivo-num">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label">Pasivo Total (cuenta 2)</div>
+                    <div class="evo-kpi-valor" id="depositos-pasivo-den">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="depositos-pasivo-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="depositos-pasivo-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica de Depósitos sobre Pasivo</h2>
+                <p class="seccion-subtitulo">Depósitos ÷ Pasivo · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartDepositosPasivo-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container" id="depositos-pasivo-scroll-container">
+                        <div class="chart-inner" id="depositos-pasivo-inner"><canvas id="chartDepositosPasivo"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle del Cálculo por Período</h2>
+                <p class="seccion-subtitulo">Componentes de la fórmula y resultado en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="depositos-pasivo-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="depositos-pasivo-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: DEPÓSITOS SOBRE CARTERA (21 / Cartera) ========== -->
+        <div class="container oculto" id="depositos-cartera-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-pasivo" onclick="volverAlSubmenuPasivo()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Pasivo</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#045988;">Depósitos sobre Cartera</h1>
+                    <div class="subtitle">Depósitos (cuenta 21) sobre la Cartera</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="cobertura-toggle" id="depositos-cartera-toggle">
+                        <span class="cobertura-toggle-titulo">TIPO DE CARTERA</span>
+                        <div class="cobertura-toggle-group">
+                            <button class="cobertura-toggle-btn activo" data-cart="creditos" onclick="cambiarCarteraDepCartera('creditos')">Cartera Créditos</button>
+                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraDepCartera('total')">Cartera Total</button>
+                        </div>
+                    </div>
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="depositos-cartera-filtro-anio">Año</label><select id="depositos-cartera-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="depositos-cartera-filtro-mes">Mes</label><select id="depositos-cartera-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" id="btn-excel-depositos-cartera" onclick="descargarExcelDepositosCartera()" title="Descargar reporte detallado en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="gauge-card" style="max-width:420px;margin:0 auto 22px;">
+                <div class="gauge-label">Depósitos sobre Cartera</div>
+                <div class="gauge-periodo" id="depositos-cartera-gauge-periodo">--</div>
+                <div class="gauge-wrapper" id="depositos-cartera-gauge-wrapper"></div>
+            </div>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-pasivo evo-kpi-principal">
+                    <div class="evo-kpi-label">Depósitos sobre Cartera</div>
+                    <div class="evo-kpi-valor" id="depositos-cartera-valor">—</div>
+                    <div class="evo-kpi-sub" id="depositos-cartera-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label">Depósitos (cuenta 21)</div>
+                    <div class="evo-kpi-valor" id="depositos-cartera-num">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label" id="depositos-cartera-den-label">Cartera</div>
+                    <div class="evo-kpi-valor" id="depositos-cartera-den">—</div>
+                    <div class="evo-kpi-sub">Millones COP</div>
+                </div>
+                <div class="evo-kpi evo-kpi-pasivo">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="depositos-cartera-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="depositos-cartera-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica de Depósitos sobre Cartera</h2>
+                <p class="seccion-subtitulo" id="depositos-cartera-graf-sub">Depósitos ÷ Cartera · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartDepositosCartera-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container" id="depositos-cartera-scroll-container">
+                        <div class="chart-inner" id="depositos-cartera-inner"><canvas id="chartDepositosCartera"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <h2 class="section-title">Detalle del Cálculo por Período</h2>
+                <p class="seccion-subtitulo">Componentes de la fórmula y resultado en cada mes</p>
+                <div class="historico-flex-wrap">
+                    <div class="chart-scroll-container" id="depositos-cartera-tabla-scroll" style="overflow-x:auto;">
+                        <table class="depositos-tabla" id="depositos-cartera-tabla"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        
+        <!-- ========== MÓDULO: ROE (independiente) ========== -->
+        <div class="container oculto" id="rent-roe-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">ROE · Rentabilidad sobre Recursos Propios</h1>
+                    <div class="subtitle">Rentabilidad anualizada del excedente sobre el patrimonio promedio</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="rind-roe-filtro-anio">Año</label><select id="rind-roe-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="rind-roe-filtro-mes">Mes</label><select id="rind-roe-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="descargarExcelRindRoe()" title="Descargar en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">ROE · Rentabilidad sobre Recursos Propios</div>
+                    <div class="evo-kpi-valor" id="rind-roe-valor">—</div>
+                    <div class="evo-kpi-sub" id="rind-roe-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="rind-roe-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="rind-roe-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica del ROE</h2>
+                <p class="seccion-subtitulo">Rentabilidad anualizada sobre el patrimonio promedio · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartRindRoe-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="rind-roe-scroll-container">
+                        <div class="chart-inner" id="rind-roe-inner"><canvas id="chartRindRoe"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">(1 + (Excedente / (Patrimonio<sub>prom</sub> × n)))<sup>n</sup> − 1</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rind-roe-c-exc">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio total actual (Cta 3)</span><span class="rent-comp-row-valor" id="rind-roe-c-act">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio mismo mes año ant.</span><span class="rent-comp-row-valor" id="rind-roe-c-ant">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Patrimonio promedio</span><span class="rent-comp-row-valor" id="rind-roe-c-prom">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Mes del año (n)</span><span class="rent-comp-row-valor" id="rind-roe-c-n">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">ROE anualizado</span><span class="rent-comp-row-valor" id="rind-roe-c-final">—</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: MARGEN NETO (independiente) ========== -->
+        <div class="container oculto" id="rent-mn-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">Margen Neto</h1>
+                    <div class="subtitle">Excedente sobre ingresos por ventas y recuperaciones (acumulado YTD)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="rind-mn-filtro-anio">Año</label><select id="rind-mn-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="rind-mn-filtro-mes">Mes</label><select id="rind-mn-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="descargarExcelRindMn()" title="Descargar en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">Margen Neto</div>
+                    <div class="evo-kpi-valor" id="rind-mn-valor">—</div>
+                    <div class="evo-kpi-sub" id="rind-mn-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="rind-mn-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="rind-mn-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica del Margen Neto</h2>
+                <p class="seccion-subtitulo">Excedente ÷ (Ingresos 41 + Recuperaciones 4225) · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartRindMn-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="rind-mn-scroll-container">
+                        <div class="chart-inner" id="rind-mn-inner"><canvas id="chartRindMn"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">Excedente / (Ingresos 41 + Recuperaciones 4225)</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rind-mn-c-exc">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Ingresos por ventas (Cta 41)</span><span class="rent-comp-row-valor" id="rind-mn-c-41">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Recuperaciones (Cta 4225)</span><span class="rent-comp-row-valor" id="rind-mn-c-4225">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Denominador (41 + 4225)</span><span class="rent-comp-row-valor" id="rind-mn-c-denom">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">Margen Neto</span><span class="rent-comp-row-valor" id="rind-mn-c-final">—</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: ROIC (independiente) ========== -->
+        <div class="container oculto" id="rent-roic-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">ROIC · Rentabilidad sobre Capital Invertido</h1>
+                    <div class="subtitle">Rentabilidad anualizada del excedente sobre depósitos + obligaciones + patrimonio (promedios)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="rind-roic-filtro-anio">Año</label><select id="rind-roic-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="rind-roic-filtro-mes">Mes</label><select id="rind-roic-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="descargarExcelRindRoic()" title="Descargar en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">ROIC · Rentabilidad sobre Capital Invertido</div>
+                    <div class="evo-kpi-valor" id="rind-roic-valor">—</div>
+                    <div class="evo-kpi-sub" id="rind-roic-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="rind-roic-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="rind-roic-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica del ROIC</h2>
+                <p class="seccion-subtitulo">Rentabilidad anualizada sobre el capital invertido promedio · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartRindRoic-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="rind-roic-scroll-container">
+                        <div class="chart-inner" id="rind-roic-inner"><canvas id="chartRindRoic"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">(1 + (Excedente / (Capital invertido<sub>prom</sub> × n)))<sup>n</sup> − 1</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rind-roic-c-exc">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Prom. Depósitos (Cta 21)</span><span class="rent-comp-row-valor" id="rind-roic-c-dep">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Prom. Obligaciones (Cta 23)</span><span class="rent-comp-row-valor" id="rind-roic-c-obl">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Prom. Patrimonio (Cta 3)</span><span class="rent-comp-row-valor" id="rind-roic-c-patr">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Capital invertido (denominador)</span><span class="rent-comp-row-valor" id="rind-roic-c-denom">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Mes del año (n)</span><span class="rent-comp-row-valor" id="rind-roic-c-n">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">ROIC anualizado</span><span class="rent-comp-row-valor" id="rind-roic-c-final">—</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ========== MÓDULO: ROA (independiente, nuevo) ========== -->
+        <div class="container oculto" id="rent-roa-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-icg" onclick="volverAlSubmenuIngresos()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Ingresos, Costos y Gastos</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">ROA · Rentabilidad sobre Activos</h1>
+                    <div class="subtitle">Rentabilidad anualizada del excedente sobre el activo promedio (cuenta 1)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="rind-roa-filtro-anio">Año</label><select id="rind-roa-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="rind-roa-filtro-mes">Mes</label><select id="rind-roa-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="descargarExcelRindRoa()" title="Descargar en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="evolucion-kpis-grid">
+                <div class="evo-kpi evo-kpi-icg-ingresos evo-kpi-principal">
+                    <div class="evo-kpi-label">ROA · Rentabilidad sobre Activos</div>
+                    <div class="evo-kpi-valor" id="rind-roa-valor">—</div>
+                    <div class="evo-kpi-sub" id="rind-roa-periodo">—</div>
+                </div>
+                <div class="evo-kpi evo-kpi-icg-ingresos">
+                    <div class="evo-kpi-label">Variación vs Mes Anterior</div>
+                    <div class="evo-kpi-valor" id="rind-roa-var-mes">—</div>
+                    <div class="evo-kpi-sub" id="rind-roa-var-mes-sub">—</div>
+                </div>
+            </div>
+            <div class="section acc-graficos">
+                <h2 class="section-title">Evolución Histórica del ROA</h2>
+                <p class="seccion-subtitulo">Rentabilidad anualizada sobre el activo promedio · expresado en porcentaje</p>
+                <div class="historico-flex-wrap">
+                    <div class="historico-eje-fijo"><div id="chartRindRoa-axis-container" class="eje-y-html-container"></div></div>
+                    <div class="chart-scroll-container chart-scroll-icg" id="rind-roa-scroll-container">
+                        <div class="chart-inner" id="rind-roa-inner"><canvas id="chartRindRoa"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+            </div>
+            <div class="section seccion-evolucion-composicion">
+                <div class="rent-comp-card rent-comp-card-full">
+                    <div class="rent-comp-titulo" style="color:#11782C;">Composición del período seleccionado</div>
+                    <div class="rent-comp-formula">(1 + (Excedente / (Activo<sub>prom</sub> × n)))<sup>n</sup> − 1</div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Excedente (Cta 53)</span><span class="rent-comp-row-valor" id="rind-roa-c-exc">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Activo total actual (Cta 1)</span><span class="rent-comp-row-valor" id="rind-roa-c-act">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Activo mismo mes año ant.</span><span class="rent-comp-row-valor" id="rind-roa-c-ant">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Activo promedio</span><span class="rent-comp-row-valor" id="rind-roa-c-prom">—</span></div>
+                    <div class="rent-comp-row"><span class="rent-comp-row-label">Mes del año (n)</span><span class="rent-comp-row-valor" id="rind-roa-c-n">—</span></div>
+                    <div class="rent-comp-row rent-comp-row-final" style="color:#11782C;"><span class="rent-comp-row-label">ROA anualizado</span><span class="rent-comp-row-valor" id="rind-roa-c-final">—</span></div>
+                </div>
+            </div>
         </div>
 
         <!-- ========== MÓDULO: CAPITAL INSTITUCIONAL ((32+33+34) / Activo 1) ========== -->
@@ -8327,9 +9015,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             <!-- HEADER -->
             <header class="header">
                 <div class="header-titulo">
-                    <button class="btn-menu" onclick="volverAlMenu()" title="Volver al menú principal" style="margin-bottom: 10px;">
+                    <button class="btn-menu" onclick="volverAlMenu()" title="Volver al módulo Patrimonio" style="margin-bottom: 10px;">
                         <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                        <span>Volver al menú</span>
+                        <span>Volver al módulo Patrimonio</span>
                     </button>
                     <h1>Dashboard Financiero · Indicadores Regulatorios</h1>
                     <div class="subtitle">Solvencia, patrimonio técnico y límites operativos</div>
@@ -8665,6 +9353,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const DATOS_DEPOSITOS = {json.dumps(depositos_json, default=_json_default, ensure_ascii=False)};
         const SERIE_DEP_TOTAL   = DATOS_DEPOSITOS.map(r => r.total_depositos);
         const SERIE_DEP_CAPITAL = DATOS_DEPOSITOS.map(r => r.total_capital);
+        
+        // ===== DATOS DE INDICADORES ADICIONALES (cuentas directas por período) =====
+        const DATOS_INDICADORES = {json.dumps(series_indicadores, default=_json_default)};
         
         // ===== SERIES DE COMPOSICIÓN (Numerador / Denominador) =====
         const SERIE_SOLVENCIA_NUM = {json.dumps(serie_solvencia_num, default=_json_default)};
@@ -9106,10 +9797,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     }}
                 }}
             }});
-            // Sincronizar eje Y HTML para Liquidez
-            sincronizarEjeYHistorico(SERIE_LIQUIDEZ, 'chartLiquidez-axis-container', {{
-                tituloEje: 'Fondo Liquidez (%)'
-            }});
+            // Sincronizar eje Y HTML para Liquidez (barras con mín y máx ajustados)
+            const ejeLiq = _rangoEjeAjustado(SERIE_LIQUIDEZ);
+            renderEjeYHTML('chartLiquidez-axis-container', ejeLiq.niceMax,
+                (v) => (Math.round(v * 10) / 10).toString().replace('.', ',') + '%',
+                {{ tituloEje: 'Fondo Liquidez (%)', minValue: ejeLiq.niceMin }});
+            aplicarEjeAlChart(chartLiquidez, ejeLiq);
         }}
         
         function actualizarGraficos(idxActual) {{
@@ -11536,7 +12229,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             'mora-root', 'riesgo-root', 'cobertura-root', 'crecimiento-root',
             'evolucion-activo-root', 'evolucion-pasivo-root', 'evolucion-patrimonio-root',
             'evolucion-icg-root', 'rentabilidad-root', 'depositos-root',
-            'quebranto-root', 'capital-inst-root', 'suficiencia-root'
+            'quebranto-root', 'capital-inst-root', 'suficiencia-root',
+            'margen-total-root', 'cartera-activo-root', 'depositos-pasivo-root', 'depositos-cartera-root',
+            'rent-roe-root', 'rent-mn-root', 'rent-roic-root', 'rent-roa-root'
         ];
         function ocultarTodosLosModulos() {{
             TODOS_LOS_MODULOS.forEach(id => {{
@@ -12000,6 +12695,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
             html += '</tbody>';
             document.getElementById('suficiencia-tabla').innerHTML = html;
+            // Tabla resumen de composición
+            document.getElementById('smf-comp-41').textContent = fmtMillEnt(r.c41);
+            document.getElementById('smf-comp-61').textContent = fmtMillEnt(r.c61);
+            document.getElementById('smf-comp-mfb').textContent = fmtMillEnt(r.mfb);
+            document.getElementById('smf-comp-gastos').textContent = fmtMillEnt(r.gastosNetos);
+            document.getElementById('smf-comp-final').textContent = fmtPctDirecto(r.ratio);
         }}
 
         async function descargarExcelSuficiencia() {{
@@ -12042,6 +12743,589 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             saveAs(new Blob([buf]), 'Suficiencia_Margen_Financiero.xlsx');
         }}
 
+        // ==========================================================
+        // ===== MÓDULOS DE INDICADORES ADICIONALES =====
+        // Margen Total, Cartera/Activo, Depósitos/Pasivo, Depósitos/Cartera
+        // Todos en %, con división por cero protegida y eje ajustado.
+        // ==========================================================
+
+        // Cartera Total por período (suma de cuentas brutas 14xx, calculada en Python).
+        // ==========================================================
+        // ===== GAUGE 0-100% DE 5 TRAMOS (mejor mientras más alto) =====
+        // Mismo estilo/comportamiento que el gauge de Solvencia.
+        // Tramos: 0-20 rojo, 20-40 naranja, 40-60 amarillo,
+        //         60-80 verde claro, 80-100 verde oscuro.
+        // ==========================================================
+        // Devuelve el HTML del SVG del gauge con IDs prefijados.
+        function _svgGauge100(prefijo) {{
+            return `
+                <svg class="gauge-svg" viewBox="0 0 200 165" preserveAspectRatio="xMidYMid meet">
+                    <path class="gauge-arc-bg" d="M 30 100 A 70 70 0 0 1 170 100"/>
+                    <!-- 5 tramos iguales de 20% -->
+                    <path class="gauge-arc-zone gauge-zone-red"         d="M 30 100 A 70 70 0 0 1 43.37 58.86"/>
+                    <path class="gauge-arc-zone gauge-zone-orange"      d="M 43.37 58.86 A 70 70 0 0 1 78.37 33.43"/>
+                    <path class="gauge-arc-zone gauge-zone-yellow"      d="M 78.37 33.43 A 70 70 0 0 1 121.63 33.43"/>
+                    <path class="gauge-arc-zone gauge-zone-green-light" d="M 121.63 33.43 A 70 70 0 0 1 156.63 58.86"/>
+                    <path class="gauge-arc-zone gauge-zone-green-dark"  d="M 156.63 58.86 A 70 70 0 0 1 170 100"/>
+                    <!-- Etiquetas en chips -->
+                    <g><rect class="gauge-tick-chip" x="2" y="93" width="20" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="12" y="103" text-anchor="middle">0%</text></g>
+                    <g><rect class="gauge-tick-chip" x="14" y="41" width="26" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="27" y="51" text-anchor="middle">20%</text></g>
+                    <g><rect class="gauge-tick-chip" x="60" y="9" width="26" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="73" y="19" text-anchor="middle">40%</text></g>
+                    <g><rect class="gauge-tick-chip" x="114" y="9" width="26" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="127" y="19" text-anchor="middle">60%</text></g>
+                    <g><rect class="gauge-tick-chip" x="160" y="41" width="26" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="173" y="51" text-anchor="middle">80%</text></g>
+                    <g><rect class="gauge-tick-chip" x="173" y="93" width="26" height="14" rx="4"/>
+                       <text class="gauge-tick-label" x="186" y="103" text-anchor="middle">100%</text></g>
+                    <!-- Aguja -->
+                    <g id="${{prefijo}}-needle-group" class="gauge-needle-group">
+                        <polygon class="gauge-needle-line" points="97,100 103,100 100.5,40 99.5,40"/>
+                        <circle class="gauge-needle-hub" cx="100" cy="100" r="6.5"/>
+                    </g>
+                    <!-- Valor central -->
+                    <text id="${{prefijo}}-text" class="gauge-center-value" x="100" y="142">--</text>
+                </svg>`;
+        }}
+        // Grados de la aguja: 0% -> -90°, 100% -> +90°
+        function _gradosGauge100(pct) {{
+            const v = Math.max(0, Math.min(pct, 100));
+            return -90 + (v / 100) * 180;
+        }}
+        // Clase de zona del valor central según el tramo (mejor mientras más alto)
+        function _zonaGauge100(pct) {{
+            if (pct < 20) return 'zona-rojo';
+            if (pct < 40) return 'zona-naranja';
+            if (pct < 60) return 'zona-amarillo';
+            if (pct < 80) return 'zona-verde-light';
+            return 'zona-verde-dark';
+        }}
+        // Posiciona la aguja y el valor central de un gauge de 100%.
+        function _actualizarGauge100(prefijo, pct) {{
+            const needle = document.getElementById(prefijo + '-needle-group');
+            const gtext = document.getElementById(prefijo + '-text');
+            if (!needle || !gtext) return;
+            if (pct === null || pct === undefined || isNaN(pct)) {{
+                needle.style.transform = 'rotate(-90deg)';
+                gtext.textContent = '—';
+                gtext.setAttribute('class', 'gauge-center-value');
+                return;
+            }}
+            needle.style.transform = `rotate(${{_gradosGauge100(pct)}}deg)`;
+            gtext.textContent = fmtPctDirecto(pct);
+            gtext.setAttribute('class', 'gauge-center-value ' + _zonaGauge100(pct));
+        }}
+
+        function _carteraTotalPeriodo(i) {{
+            const r = DATOS_INDICADORES[i];
+            if (!r) return 0;
+            return (r.cartera_total || r.cartera_total === 0) ? r.cartera_total : r.cta_14;
+        }}
+        function _ratioPct(num, den) {{
+            return (den && den !== 0) ? (num / den) * 100 : null; // división por cero -> null
+        }}
+
+        // ----------------- MARGEN TOTAL (35 / 4) -----------------
+        const MGT_STATE = {{ inic: false, chart: null, idx: 0 }};
+        const DATOS_MARGEN_TOTAL = DATOS_INDICADORES.map(r => ({{
+            anio: r.anio, mes: r.mes, num: r.cta_35, den: r.cta_4,
+            ratio: _ratioPct(r.cta_35, r.cta_4)
+        }}));
+        function abrirMargenTotal() {{
+            ocultarTodosLosModulos();
+            document.getElementById('margen-total-root').classList.remove('oculto');
+            if (!MGT_STATE.inic) {{
+                MGT_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_MARGEN_TOTAL, 'margen-total-filtro-anio', 'margen-total-filtro-mes', aplicarFiltroMargenTotal);
+                MGT_STATE.idx = DATOS_MARGEN_TOTAL.length - 1;
+                renderMargenTotal();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('margen-total-inner', 'margen-total-scroll-container', DATOS_MARGEN_TOTAL.length); if (MGT_STATE.chart) MGT_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroMargenTotal() {{
+            const anio = parseInt(document.getElementById('margen-total-filtro-anio').value);
+            const mes = document.getElementById('margen-total-filtro-mes').value;
+            const idx = DATOS_MARGEN_TOTAL.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ MGT_STATE.idx = idx; renderMargenTotal(); }}
+        }}
+        function renderMargenTotal() {{
+            const datos = DATOS_MARGEN_TOTAL, idx = MGT_STATE.idx, r = datos[idx];
+            const COLOR = '#11782C';
+            const serie = datos.map(d => d.ratio);
+            const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+            document.getElementById('margen-total-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('margen-total-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('margen-total-num').textContent = fmtMillEnt(r.num);
+            document.getElementById('margen-total-den').textContent = fmtMillEnt(r.den);
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('margen-total-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('margen-total-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+            _ajustarAnchoRatio('margen-total-inner', 'margen-total-scroll-container', datos.length);
+            if (MGT_STATE.chart) MGT_STATE.chart.destroy();
+            MGT_STATE.chart = _crearGraficoRatio('chartMargenTotal', 'chartMargenTotal-axis-container', serie, etq, etqL, COLOR, idx);
+            setTimeout(() => _scrollRatio('margen-total-scroll-container', 'margen-total-inner', idx, datos.length), 100);
+            let html = '<thead><tr><th>Período</th><th style="text-align:right;">Excedentes (35)</th><th style="text-align:right;">Ingresos (4)</th><th style="text-align:right;">Margen Total</th></tr></thead><tbody>';
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E3F4E8;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.num)}}</td><td style="text-align:right;">${{fmtMillEnt(d.den)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('margen-total-tabla').innerHTML = html;
+            // Tabla resumen de composición
+            document.getElementById('mgt-comp-num').textContent = fmtMillEnt(r.num);
+            document.getElementById('mgt-comp-den').textContent = fmtMillEnt(r.den);
+            document.getElementById('mgt-comp-final').textContent = fmtPctDirecto(r.ratio);
+        }}
+        async function descargarExcelMargenTotal() {{
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Margen Total');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Excedentes/Pérdidas (35)', key: 'n', width: 24 }},
+                {{ header: 'Ingresos (4)', key: 'd', width: 18 }},
+                {{ header: 'Margen Total (35/4)', key: 'r', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF11782C' }} }};
+            DATOS_MARGEN_TOTAL.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
+                const rn = i + 2;
+                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
+                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
+                row.getCell('r').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Margen_Total.xlsx');
+        }}
+
+        // ----------------- CARTERA SOBRE ACTIVO (Cartera / 1) -----------------
+        const CARTA_STATE = {{ inic: false, chart: null, idx: 0, cartera: 'creditos' }};
+        function _datosCarteraActivo(cartera) {{
+            return DATOS_INDICADORES.map((r, i) => {{
+                const num = cartera === 'total' ? _carteraTotalPeriodo(i) : r.cta_14;
+                return {{ anio: r.anio, mes: r.mes, num: num, den: r.cta_1, ratio: _ratioPct(num, r.cta_1) }};
+            }});
+        }}
+        function abrirCarteraActivo() {{
+            ocultarTodosLosModulos();
+            document.getElementById('cartera-activo-root').classList.remove('oculto');
+            if (!CARTA_STATE.inic) {{
+                CARTA_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_INDICADORES, 'cartera-activo-filtro-anio', 'cartera-activo-filtro-mes', aplicarFiltroCarteraActivo);
+                CARTA_STATE.idx = DATOS_INDICADORES.length - 1;
+                renderCarteraActivo();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('cartera-activo-inner', 'cartera-activo-scroll-container', DATOS_INDICADORES.length); if (CARTA_STATE.chart) CARTA_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroCarteraActivo() {{
+            const anio = parseInt(document.getElementById('cartera-activo-filtro-anio').value);
+            const mes = document.getElementById('cartera-activo-filtro-mes').value;
+            const idx = DATOS_INDICADORES.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ CARTA_STATE.idx = idx; renderCarteraActivo(); }}
+        }}
+        function cambiarCarteraCartActivo(cart) {{
+            if (cart === CARTA_STATE.cartera) return;
+            CARTA_STATE.cartera = cart;
+            document.querySelectorAll('#cartera-activo-toggle .cobertura-toggle-btn').forEach(b => b.classList.toggle('activo', b.dataset.cart === cart));
+            renderCarteraActivo();
+        }}
+        function renderCarteraActivo() {{
+            const datos = _datosCarteraActivo(CARTA_STATE.cartera), idx = CARTA_STATE.idx, r = datos[idx];
+            const COLOR = '#237C70';
+            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Créditos';
+            const serie = datos.map(d => d.ratio);
+            const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+            document.getElementById('cartera-activo-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('cartera-activo-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('cartera-activo-num-label').textContent = nomCart;
+            document.getElementById('cartera-activo-num').textContent = fmtMillEnt(r.num);
+            document.getElementById('cartera-activo-den').textContent = fmtMillEnt(r.den);
+            document.getElementById('cartera-activo-graf-sub').textContent = `${{nomCart}} ÷ Activo · expresado en porcentaje`;
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('cartera-activo-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('cartera-activo-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+            _ajustarAnchoRatio('cartera-activo-inner', 'cartera-activo-scroll-container', datos.length);
+            if (CARTA_STATE.chart) CARTA_STATE.chart.destroy();
+            CARTA_STATE.chart = _crearGraficoRatio('chartCarteraActivo', 'chartCarteraActivo-axis-container', serie, etq, etqL, COLOR, idx);
+            setTimeout(() => _scrollRatio('cartera-activo-scroll-container', 'cartera-activo-inner', idx, datos.length), 100);
+            let html = `<thead><tr><th>Período</th><th style="text-align:right;">${{nomCart}}</th><th style="text-align:right;">Activo (1)</th><th style="text-align:right;">Cartera/Activo</th></tr></thead><tbody>`;
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E0F2EE;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.num)}}</td><td style="text-align:right;">${{fmtMillEnt(d.den)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('cartera-activo-tabla').innerHTML = html;
+            // Gauge velocímetro
+            const gw = document.getElementById('cartera-activo-gauge-wrapper');
+            if (gw && !gw.innerHTML.trim()) gw.innerHTML = _svgGauge100('cartera-activo-gauge');
+            document.getElementById('cartera-activo-gauge-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            _actualizarGauge100('cartera-activo-gauge', r.ratio);
+        }}
+        async function descargarExcelCarteraActivo() {{
+            const datos = _datosCarteraActivo(CARTA_STATE.cartera);
+            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Creditos';
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Cartera sobre Activo');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: nomCart, key: 'n', width: 22 }},
+                {{ header: 'Activo (1)', key: 'd', width: 18 }},
+                {{ header: 'Cartera / Activo', key: 'r', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF237C70' }} }};
+            datos.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
+                const rn = i + 2;
+                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
+                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
+                row.getCell('r').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Cartera_sobre_Activo.xlsx');
+        }}
+
+        // ----------------- DEPÓSITOS SOBRE PASIVO (21 / 2) -----------------
+        const DPAS_STATE = {{ inic: false, chart: null, idx: 0 }};
+        const DATOS_DEP_PASIVO = DATOS_INDICADORES.map(r => ({{
+            anio: r.anio, mes: r.mes, num: r.cta_21, den: r.cta_2, ratio: _ratioPct(r.cta_21, r.cta_2)
+        }}));
+        function abrirDepositosPasivo() {{
+            ocultarTodosLosModulos();
+            document.getElementById('depositos-pasivo-root').classList.remove('oculto');
+            if (!DPAS_STATE.inic) {{
+                DPAS_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_DEP_PASIVO, 'depositos-pasivo-filtro-anio', 'depositos-pasivo-filtro-mes', aplicarFiltroDepPasivo);
+                DPAS_STATE.idx = DATOS_DEP_PASIVO.length - 1;
+                renderDepPasivo();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('depositos-pasivo-inner', 'depositos-pasivo-scroll-container', DATOS_DEP_PASIVO.length); if (DPAS_STATE.chart) DPAS_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroDepPasivo() {{
+            const anio = parseInt(document.getElementById('depositos-pasivo-filtro-anio').value);
+            const mes = document.getElementById('depositos-pasivo-filtro-mes').value;
+            const idx = DATOS_DEP_PASIVO.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ DPAS_STATE.idx = idx; renderDepPasivo(); }}
+        }}
+        function renderDepPasivo() {{
+            const datos = DATOS_DEP_PASIVO, idx = DPAS_STATE.idx, r = datos[idx];
+            const COLOR = '#045988';
+            const serie = datos.map(d => d.ratio);
+            const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+            document.getElementById('depositos-pasivo-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('depositos-pasivo-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('depositos-pasivo-num').textContent = fmtMillEnt(r.num);
+            document.getElementById('depositos-pasivo-den').textContent = fmtMillEnt(r.den);
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('depositos-pasivo-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('depositos-pasivo-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+            _ajustarAnchoRatio('depositos-pasivo-inner', 'depositos-pasivo-scroll-container', datos.length);
+            if (DPAS_STATE.chart) DPAS_STATE.chart.destroy();
+            DPAS_STATE.chart = _crearGraficoRatio('chartDepositosPasivo', 'chartDepositosPasivo-axis-container', serie, etq, etqL, COLOR, idx);
+            setTimeout(() => _scrollRatio('depositos-pasivo-scroll-container', 'depositos-pasivo-inner', idx, datos.length), 100);
+            let html = '<thead><tr><th>Período</th><th style="text-align:right;">Depósitos (21)</th><th style="text-align:right;">Pasivo (2)</th><th style="text-align:right;">Depósitos/Pasivo</th></tr></thead><tbody>';
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E3EFF6;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.num)}}</td><td style="text-align:right;">${{fmtMillEnt(d.den)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('depositos-pasivo-tabla').innerHTML = html;
+            // Gauge velocímetro
+            const gw = document.getElementById('depositos-pasivo-gauge-wrapper');
+            if (gw && !gw.innerHTML.trim()) gw.innerHTML = _svgGauge100('depositos-pasivo-gauge');
+            document.getElementById('depositos-pasivo-gauge-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            _actualizarGauge100('depositos-pasivo-gauge', r.ratio);
+        }}
+        async function descargarExcelDepositosPasivo() {{
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Depositos sobre Pasivo');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Depósitos (21)', key: 'n', width: 18 }},
+                {{ header: 'Pasivo (2)', key: 'd', width: 18 }},
+                {{ header: 'Depósitos / Pasivo', key: 'r', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF045988' }} }};
+            DATOS_DEP_PASIVO.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
+                const rn = i + 2;
+                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
+                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
+                row.getCell('r').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Depositos_sobre_Pasivo.xlsx');
+        }}
+
+        // ----------------- DEPÓSITOS SOBRE CARTERA (21 / Cartera) -----------------
+        const DCAR_STATE = {{ inic: false, chart: null, idx: 0, cartera: 'creditos' }};
+        function _datosDepCartera(cartera) {{
+            return DATOS_INDICADORES.map((r, i) => {{
+                const den = cartera === 'total' ? _carteraTotalPeriodo(i) : r.cta_14;
+                return {{ anio: r.anio, mes: r.mes, num: r.cta_21, den: den, ratio: _ratioPct(r.cta_21, den) }};
+            }});
+        }}
+        function abrirDepositosCartera() {{
+            ocultarTodosLosModulos();
+            document.getElementById('depositos-cartera-root').classList.remove('oculto');
+            if (!DCAR_STATE.inic) {{
+                DCAR_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_INDICADORES, 'depositos-cartera-filtro-anio', 'depositos-cartera-filtro-mes', aplicarFiltroDepCartera);
+                DCAR_STATE.idx = DATOS_INDICADORES.length - 1;
+                renderDepCartera();
+            }} else {{
+                requestAnimationFrame(() => {{ _ajustarAnchoRatio('depositos-cartera-inner', 'depositos-cartera-scroll-container', DATOS_INDICADORES.length); if (DCAR_STATE.chart) DCAR_STATE.chart.resize(); }});
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function aplicarFiltroDepCartera() {{
+            const anio = parseInt(document.getElementById('depositos-cartera-filtro-anio').value);
+            const mes = document.getElementById('depositos-cartera-filtro-mes').value;
+            const idx = DATOS_INDICADORES.findIndex(r => r.anio === anio && r.mes === mes);
+            if (idx >= 0) {{ DCAR_STATE.idx = idx; renderDepCartera(); }}
+        }}
+        function cambiarCarteraDepCartera(cart) {{
+            if (cart === DCAR_STATE.cartera) return;
+            DCAR_STATE.cartera = cart;
+            document.querySelectorAll('#depositos-cartera-toggle .cobertura-toggle-btn').forEach(b => b.classList.toggle('activo', b.dataset.cart === cart));
+            renderDepCartera();
+        }}
+        function renderDepCartera() {{
+            const datos = _datosDepCartera(DCAR_STATE.cartera), idx = DCAR_STATE.idx, r = datos[idx];
+            const COLOR = '#0670A8';
+            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Créditos';
+            const serie = datos.map(d => d.ratio);
+            const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
+            const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
+            document.getElementById('depositos-cartera-valor').textContent = fmtPctDirecto(r.ratio);
+            document.getElementById('depositos-cartera-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            document.getElementById('depositos-cartera-num').textContent = fmtMillEnt(r.num);
+            document.getElementById('depositos-cartera-den-label').textContent = nomCart;
+            document.getElementById('depositos-cartera-den').textContent = fmtMillEnt(r.den);
+            document.getElementById('depositos-cartera-graf-sub').textContent = `Depósitos ÷ ${{nomCart}} · expresado en porcentaje`;
+            const prev = idx > 0 ? datos[idx-1].ratio : null;
+            document.getElementById('depositos-cartera-var-mes').innerHTML = _badgeVarPct(r.ratio, prev);
+            document.getElementById('depositos-cartera-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[datos[idx-1].mes] || datos[idx-1].mes}} ${{datos[idx-1].anio}}` : '—';
+            _ajustarAnchoRatio('depositos-cartera-inner', 'depositos-cartera-scroll-container', datos.length);
+            if (DCAR_STATE.chart) DCAR_STATE.chart.destroy();
+            DCAR_STATE.chart = _crearGraficoRatio('chartDepositosCartera', 'chartDepositosCartera-axis-container', serie, etq, etqL, COLOR, idx);
+            setTimeout(() => _scrollRatio('depositos-cartera-scroll-container', 'depositos-cartera-inner', idx, datos.length), 100);
+            let html = `<thead><tr><th>Período</th><th style="text-align:right;">Depósitos (21)</th><th style="text-align:right;">${{nomCart}}</th><th style="text-align:right;">Depósitos/Cartera</th></tr></thead><tbody>`;
+            datos.forEach((d, i) => {{
+                const cls = i === idx ? ' style="background:#E3EFF6;font-weight:700;"' : '';
+                html += `<tr${{cls}}><td>${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}</td><td style="text-align:right;">${{fmtMillEnt(d.num)}}</td><td style="text-align:right;">${{fmtMillEnt(d.den)}}</td><td style="text-align:right;">${{fmtPctDirecto(d.ratio)}}</td></tr>`;
+            }});
+            html += '</tbody>';
+            document.getElementById('depositos-cartera-tabla').innerHTML = html;
+            // Gauge velocímetro
+            const gw = document.getElementById('depositos-cartera-gauge-wrapper');
+            if (gw && !gw.innerHTML.trim()) gw.innerHTML = _svgGauge100('depositos-cartera-gauge');
+            document.getElementById('depositos-cartera-gauge-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}}`;
+            _actualizarGauge100('depositos-cartera-gauge', r.ratio);
+        }}
+        async function descargarExcelDepositosCartera() {{
+            const datos = _datosDepCartera(DCAR_STATE.cartera);
+            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Creditos';
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Depositos sobre Cartera');
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: 'Depósitos (21)', key: 'n', width: 18 }},
+                {{ header: nomCart, key: 'd', width: 22 }},
+                {{ header: 'Depósitos / Cartera', key: 'r', width: 20 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF0670A8' }} }};
+            datos.forEach((d, i) => {{
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
+                const rn = i + 2;
+                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
+                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
+                row.getCell('r').numFmt = '0.00%';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), 'Depositos_sobre_Cartera.xlsx');
+        }}
+
+        // ==========================================================
+        // ===== MÓDULOS INDEPENDIENTES DE RENTABILIDAD =====
+        // ROE, Margen Neto, ROIC, ROA — cada uno con gráfico verde
+        // estilo Margen Total + tabla resumen de composición.
+        // Reutilizan calcularRentabilidadPeriodo() y _crearGraficoRatio().
+        // ==========================================================
+        const COLOR_RENT_IND = '#11782C';  // verde del módulo Ingresos (igual a Margen Total)
+
+        // Construye la serie (en %) de un indicador de rentabilidad
+        function _serieRentInd(key) {{
+            return DATOS_ICG.map((r, i) => {{
+                const c = calcularRentabilidadPeriodo(i);
+                const v = c ? c[key] : null;
+                return (v === null || v === undefined || isNaN(v)) ? null : v * 100;
+            }});
+        }}
+        function _etqRentInd() {{
+            return {{
+                cortas: DATOS_ICG.map(r => `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0,3)}}-${{String(r.anio).substring(2)}}`),
+                largas: DATOS_ICG.map(r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`)
+            }};
+        }}
+        // Helper genérico para abrir/filtrar/render de un indicador independiente
+        function _crearModuloRentInd(cfg) {{
+            const STATE = {{ inic: false, chart: null, idx: 0 }};
+            cfg._state = STATE;
+            cfg.abrir = function() {{
+                ocultarTodosLosModulos();
+                document.getElementById(cfg.rootId).classList.remove('oculto');
+                if (!STATE.inic) {{
+                    STATE.inic = true;
+                    _poblarFiltrosModulo(DATOS_ICG, cfg.filtroAnio, cfg.filtroMes, cfg.aplicarFiltro);
+                    STATE.idx = DATOS_ICG.length - 1;
+                    cfg.render();
+                }} else {{
+                    requestAnimationFrame(() => {{ _ajustarAnchoRatio(cfg.inner, cfg.scroll, DATOS_ICG.length); if (STATE.chart) STATE.chart.resize(); }});
+                }}
+                window.scrollTo({{ top: 0, behavior: 'instant' }});
+            }};
+            cfg.aplicarFiltro = function() {{
+                const anio = parseInt(document.getElementById(cfg.filtroAnio).value);
+                const mes = document.getElementById(cfg.filtroMes).value;
+                const idx = DATOS_ICG.findIndex(r => r.anio === anio && r.mes === mes);
+                if (idx >= 0) {{ STATE.idx = idx; cfg.render(); }}
+            }};
+            cfg.render = function() {{
+                const idx = STATE.idx, r = DATOS_ICG[idx];
+                const serie = _serieRentInd(cfg.key);
+                const etq = _etqRentInd();
+                const calc = calcularRentabilidadPeriodo(idx) || {{}};
+                const val = serie[idx];
+                document.getElementById(cfg.prefijo + '-valor').textContent = fmtPctDirecto(val);
+                document.getElementById(cfg.prefijo + '-periodo').textContent = `${{MESES_NOMBRE[r.mes] || r.mes}} de ${{r.anio}} · ${{cfg.sufijoPeriodo}}`;
+                const prev = idx > 0 ? serie[idx-1] : null;
+                document.getElementById(cfg.prefijo + '-var-mes').innerHTML = _badgeVarPct(val, prev);
+                document.getElementById(cfg.prefijo + '-var-mes-sub').textContent = idx > 0 ? `vs ${{MESES_NOMBRE[DATOS_ICG[idx-1].mes] || DATOS_ICG[idx-1].mes}} ${{DATOS_ICG[idx-1].anio}}` : '—';
+                _ajustarAnchoRatio(cfg.inner, cfg.scroll, DATOS_ICG.length);
+                if (STATE.chart) STATE.chart.destroy();
+                STATE.chart = _crearGraficoRatio(cfg.canvas, cfg.axis, serie, etq.cortas, etq.largas, COLOR_RENT_IND, idx);
+                setTimeout(() => _scrollRatio(cfg.scroll, cfg.inner, idx, DATOS_ICG.length), 100);
+                cfg.llenarComposicion(calc.inputs || {{}}, val);
+            }};
+            return cfg;
+        }}
+
+        // ---- ROE ----
+        const RENT_ROE = _crearModuloRentInd({{
+            key: 'roe', rootId: 'rent-roe-root', prefijo: 'rind-roe', sufijoPeriodo: 'anualizado',
+            filtroAnio: 'rind-roe-filtro-anio', filtroMes: 'rind-roe-filtro-mes',
+            canvas: 'chartRindRoe', axis: 'chartRindRoe-axis-container',
+            inner: 'rind-roe-inner', scroll: 'rind-roe-scroll-container',
+            llenarComposicion: (inp, val) => {{
+                document.getElementById('rind-roe-c-exc').textContent = fmtMillEnt(inp.excedente);
+                document.getElementById('rind-roe-c-act').textContent = fmtMillEnt(inp.patrAct);
+                document.getElementById('rind-roe-c-ant').textContent = fmtMillEnt(inp.patrMesAnioAnt);
+                document.getElementById('rind-roe-c-prom').textContent = fmtMillEnt(inp.patrProm);
+                document.getElementById('rind-roe-c-n').textContent = inp.n != null ? String(inp.n) : '—';
+                document.getElementById('rind-roe-c-final').textContent = fmtPctDirecto(val);
+            }}
+        }});
+        function abrirRendRoe() {{ RENT_ROE.abrir(); }}
+        async function descargarExcelRindRoe() {{ await _excelRentInd('roe', 'ROE', 'Rentabilidad_ROE.xlsx'); }}
+
+        // ---- MARGEN NETO ----
+        const RENT_MN = _crearModuloRentInd({{
+            key: 'margen', rootId: 'rent-mn-root', prefijo: 'rind-mn', sufijoPeriodo: 'acumulado YTD',
+            filtroAnio: 'rind-mn-filtro-anio', filtroMes: 'rind-mn-filtro-mes',
+            canvas: 'chartRindMn', axis: 'chartRindMn-axis-container',
+            inner: 'rind-mn-inner', scroll: 'rind-mn-scroll-container',
+            llenarComposicion: (inp, val) => {{
+                document.getElementById('rind-mn-c-exc').textContent = fmtMillEnt(inp.excedente);
+                document.getElementById('rind-mn-c-41').textContent = fmtMillEnt(inp.ing41);
+                document.getElementById('rind-mn-c-4225').textContent = fmtMillEnt(inp.ing4225);
+                document.getElementById('rind-mn-c-denom').textContent = fmtMillEnt(inp.denomMargen);
+                document.getElementById('rind-mn-c-final').textContent = fmtPctDirecto(val);
+            }}
+        }});
+        function abrirRendMn() {{ RENT_MN.abrir(); }}
+        async function descargarExcelRindMn() {{ await _excelRentInd('margen', 'Margen Neto', 'Rentabilidad_Margen_Neto.xlsx'); }}
+
+        // ---- ROIC ----
+        const RENT_ROIC = _crearModuloRentInd({{
+            key: 'roic', rootId: 'rent-roic-root', prefijo: 'rind-roic', sufijoPeriodo: 'anualizado',
+            filtroAnio: 'rind-roic-filtro-anio', filtroMes: 'rind-roic-filtro-mes',
+            canvas: 'chartRindRoic', axis: 'chartRindRoic-axis-container',
+            inner: 'rind-roic-inner', scroll: 'rind-roic-scroll-container',
+            llenarComposicion: (inp, val) => {{
+                document.getElementById('rind-roic-c-exc').textContent = fmtMillEnt(inp.excedente);
+                document.getElementById('rind-roic-c-dep').textContent = fmtMillEnt(inp.promDepositos);
+                document.getElementById('rind-roic-c-obl').textContent = fmtMillEnt(inp.promObligaciones);
+                document.getElementById('rind-roic-c-patr').textContent = fmtMillEnt(inp.promPatrimonioRoic);
+                document.getElementById('rind-roic-c-denom').textContent = fmtMillEnt(inp.denomRoic);
+                document.getElementById('rind-roic-c-n').textContent = inp.n != null ? String(inp.n) : '—';
+                document.getElementById('rind-roic-c-final').textContent = fmtPctDirecto(val);
+            }}
+        }});
+        function abrirRendRoic() {{ RENT_ROIC.abrir(); }}
+        async function descargarExcelRindRoic() {{ await _excelRentInd('roic', 'ROIC', 'Rentabilidad_ROIC.xlsx'); }}
+
+        // ---- ROA (Excedente / Activo promedio, anualizado) ----
+        const RENT_ROA = _crearModuloRentInd({{
+            key: 'roa', rootId: 'rent-roa-root', prefijo: 'rind-roa', sufijoPeriodo: 'anualizado',
+            filtroAnio: 'rind-roa-filtro-anio', filtroMes: 'rind-roa-filtro-mes',
+            canvas: 'chartRindRoa', axis: 'chartRindRoa-axis-container',
+            inner: 'rind-roa-inner', scroll: 'rind-roa-scroll-container',
+            llenarComposicion: (inp, val) => {{
+                document.getElementById('rind-roa-c-exc').textContent = fmtMillEnt(inp.excedente);
+                document.getElementById('rind-roa-c-act').textContent = fmtMillEnt(inp.actAct);
+                document.getElementById('rind-roa-c-ant').textContent = fmtMillEnt(inp.actMesAnioAnt);
+                document.getElementById('rind-roa-c-prom').textContent = fmtMillEnt(inp.actProm);
+                document.getElementById('rind-roa-c-n').textContent = inp.n != null ? String(inp.n) : '—';
+                document.getElementById('rind-roa-c-final').textContent = fmtPctDirecto(val);
+            }}
+        }});
+        function abrirRendRoa() {{ RENT_ROA.abrir(); }}
+        async function descargarExcelRindRoa() {{ await _excelRentInd('roa', 'ROA', 'Rentabilidad_ROA.xlsx'); }}
+
+        // Excel genérico para un indicador de rentabilidad
+        async function _excelRentInd(key, titulo, archivo) {{
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet(titulo.substring(0, 28));
+            ws.columns = [
+                {{ header: 'Período', key: 'p', width: 20 }},
+                {{ header: titulo + ' (%)', key: 'v', width: 18 }}
+            ];
+            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF11782C' }} }};
+            DATOS_ICG.forEach((r, i) => {{
+                const c = calcularRentabilidadPeriodo(i);
+                const v = c ? c[key] : null;
+                const row = ws.addRow({{ p: `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}` }});
+                if (v !== null && v !== undefined && !isNaN(v)) {{ row.getCell('v').value = v; row.getCell('v').numFmt = '0.00%'; }}
+                else row.getCell('v').value = '—';
+            }});
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf]), archivo);
+        }}
+
+
+        // Volver al submenú Activo desde Cartera/Activo
+        function volverAlSubmenuActivoDesdeCarteraActivo() {{
+            ocultarTodosLosModulos();
+            document.getElementById('submenu-activo').classList.remove('oculto');
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+
+
 
         
         
@@ -12051,10 +13335,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const DEPOSITOS_STATE = {{ inicializado: false, charts: {{}}, chartTotal: null, idxActual: 0, modo: 'total' }};
         // Colores en gama AZUL (módulo Pasivo), un tono por producto.
         const DEP_COLORS = {{
-            ahorro_vista: '#2CAAEE',   // azul claro
-            cdat:         '#088DD5',   // azul base
-            contractual:  '#0670A8',  // azul medio
-            daes:         '#045988',  // azul oscuro
+            ahorro_vista:      '#2CAAEE',   // azul claro
+            ahorro_voluntario: '#2CAAEE',   // azul claro (componente de ahorro a la vista)
+            bolsillo_rentable: '#5BC2F2',   // azul más claro (componente de ahorro a la vista)
+            cdat:              '#088DD5',   // azul base
+            contractual:       '#0670A8',   // azul medio
+            daes:              '#045988',   // azul oscuro
         }};
         // Color ancla del total del módulo Pasivo/Depósitos
         const DEP_COLOR_TOTAL = '#088DD5'; // azul base
@@ -12078,6 +13364,51 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 if (!ant || ant === 0) return null;
                 return ((v / ant) - 1) * 100;
             }});
+        }}
+        
+        // Lista de productos a mostrar según el modo.
+        // - 'capital': Ahorro a la Vista se DESAGREGA en sus componentes (Voluntario, Bolsillo).
+        // - 'total':   Ahorro a la Vista va UNIDO (el interés 210595 es de cuenta compartida).
+        // Devuelve objetos {{ id, nombre, esComponente, parentId }}.
+        function depProductosVisibles(modo) {{
+            const ref = DATOS_DEPOSITOS[DATOS_DEPOSITOS.length - 1];
+            if (!ref) return [];
+            const lista = [];
+            ref.productos.forEach(p => {{
+                if (modo === 'capital' && p.componentes_capital && p.componentes_capital.length) {{
+                    p.componentes_capital.forEach(c => {{
+                        lista.push({{ id: c.id, nombre: c.nombre, esComponente: true, parentId: p.id }});
+                    }});
+                }} else {{
+                    lista.push({{ id: p.id, nombre: p.nombre, esComponente: false, parentId: null }});
+                }}
+            }});
+            return lista;
+        }}
+        
+        // Saldo de un componente capital (subcuenta) en un registro
+        function depSaldoComponente(reg, parentId, compId) {{
+            const p = reg.productos.find(x => x.id === parentId);
+            if (!p || !p.componentes_capital) return 0;
+            const c = p.componentes_capital.find(x => x.id === compId);
+            return c ? (c.saldo_capital || 0) : 0;
+        }}
+        
+        // Serie histórica de un item visible (producto normal o componente)
+        function depSerieItem(item, modo) {{
+            if (item.esComponente) {{
+                return DATOS_DEPOSITOS.map(r => depSaldoComponente(r, item.parentId, item.id));
+            }}
+            return depSerieProducto(item.id, modo);
+        }}
+        
+        // Saldo actual de un item visible en un registro dado
+        function depSaldoItem(reg, item, modo) {{
+            if (item.esComponente) {{
+                return depSaldoComponente(reg, item.parentId, item.id);
+            }}
+            const p = reg.productos.find(x => x.id === item.id);
+            return p ? depSaldoProducto(p, modo) : 0;
         }}
         
         function abrirCrecimientoDepositos() {{
@@ -12160,6 +13491,21 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             return `<span class="dep-crec ${{cls}}">${{fl}} ${{(sube?'+':'')}}${{v.toFixed(2).replace('.',',')}}%</span>`;
         }}
         
+        // Construye el HTML de una etiqueta integrada (nombre, valor, variación)
+        function _depTagHTML(nombre, color, valor, crec, mini) {{
+            let cls = 'igual', fl = '▬', txt = '0,00%';
+            if (crec !== null && crec !== undefined && !isNaN(crec)) {{
+                if (crec > 0.005) {{ cls = 'sube'; fl = '▲'; txt = '+' + crec.toFixed(2).replace('.', ',') + '%'; }}
+                else if (crec < -0.005) {{ cls = 'baja'; fl = '▼'; txt = crec.toFixed(2).replace('.', ',') + '%'; }}
+            }}
+            return `
+                <div class="dep-chart-tag${{mini ? ' dep-mini-tag' : ''}}">
+                    <span class="dep-tag-nombre"><span class="dep-tag-punto" style="background:${{color}}"></span>${{nombre}}</span>
+                    <span class="dep-tag-valor" style="color:${{color}}">${{fmtDepMill(valor)}}</span>
+                    <span class="dep-tag-var ${{cls}}">${{fl}} ${{txt}} <span style="color:#a0a59c;font-weight:600;">vs mes ant.</span></span>
+                </div>`;
+        }}
+        
         function renderPeriodoDepositos(idx) {{
             const r = DATOS_DEPOSITOS[idx];
             if (!r) return;
@@ -12170,43 +13516,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const totalVal = modo === 'capital' ? r.total_capital : r.total_depositos;
             const crecTotal = crecTotalSerie[idx];
             
-            // Convierte un hex en componentes rgb para fondos translúcidos
-            function _hexRgbDep(hex) {{
-                const h = hex.replace('#','');
-                return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
-            }}
-            
-            const [tr, tg, tb] = _hexRgbDep(DEP_COLOR_TOTAL);
-            let kpisHtml = `
-                <div class="dep-total-card dep-total-card--principal" style="--c:${{DEP_COLOR_TOTAL}}; --c-rgb:${{tr}},${{tg}},${{tb}};">
-                    <div class="dep-total-card-top">
-                        <span class="dep-total-card-dot"></span>
-                        <span class="dep-total-card-label">Total Depósitos</span>
-                    </div>
-                    <div class="dep-total-card-valor">${{fmtDepMill(totalVal)}}</div>
-                    <div class="dep-total-card-foot">${{badgeCrecDep(crecTotal)}} <span class="dep-total-card-ref">vs mes anterior</span></div>
-                </div>`;
-            r.productos.forEach(p => {{
-                const serie = depSerieProducto(p.id, modo);
-                const crecSerie = depCrecimientoMensual(serie);
-                const val = depSaldoProducto(p, modo);
-                const color = DEP_COLORS[p.id] || '#64748b';
-                const [pr, pg, pb] = _hexRgbDep(color);
-                kpisHtml += `
-                    <div class="dep-total-card" style="--c:${{color}}; --c-rgb:${{pr}},${{pg}},${{pb}};">
-                        <div class="dep-total-card-top">
-                            <span class="dep-total-card-dot"></span>
-                            <span class="dep-total-card-label">${{p.nombre}}</span>
-                        </div>
-                        <div class="dep-total-card-valor">${{fmtDepMill(val)}}</div>
-                        <div class="dep-total-card-foot">${{badgeCrecDep(crecSerie[idx])}} <span class="dep-total-card-ref">vs mes anterior</span></div>
-                    </div>`;
-            }});
-            document.getElementById('depositos-kpis').innerHTML = kpisHtml;
+            // Etiqueta integrada del gráfico TOTAL (esquina superior derecha)
+            document.getElementById('dep-tag-total').outerHTML =
+                _depTagHTML('Total Depósitos', DEP_COLOR_TOTAL, totalVal, crecTotal, false)
+                    .replace('class="dep-chart-tag"', 'class="dep-chart-tag" id="dep-tag-total"');
             
             document.getElementById('depositos-prod-sub').textContent =
                 `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}} - ${{modo === 'capital' ? 'Saldo capital' : 'Saldo total'}} - Crecimiento mensual`;
             
+            const items = depProductosVisibles(modo);
             const labelSaldo = modo === 'capital' ? 'Saldo Capital' : 'Saldo Total';
             let thtml = `<thead><tr>
                 <th>Producto</th>
@@ -12215,26 +13533,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <th>Participacion</th>
             </tr></thead><tbody>`;
             
-            r.productos.forEach(p => {{
-                const serie = depSerieProducto(p.id, modo);
+            items.forEach(item => {{
+                const serie = depSerieItem(item, modo);
                 const crecSerie = depCrecimientoMensual(serie);
-                const val = depSaldoProducto(p, modo);
+                const val = depSaldoItem(r, item, modo);
                 const part = totalVal > 0 ? (val / totalVal * 100) : 0;
-                const color = DEP_COLORS[p.id] || '#64748b';
+                const color = DEP_COLORS[item.id] || '#64748b';
                 thtml += `<tr class="dep-producto-row">
-                    <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${{color}}"></span>${{p.nombre}}</span></td>
+                    <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${{color}}"></span>${{item.nombre}}</span></td>
                     <td>${{fmtDepMill(val)}}</td>
                     <td>${{badgeCrecDep(crecSerie[idx])}}</td>
                     <td>${{part.toFixed(1).replace('.',',')}}%</td>
                 </tr>`;
-                (p.discriminado || []).forEach(d => {{
-                    thtml += `<tr class="dep-disc-row">
-                        <td>${{d.nombre}}</td>
-                        <td>${{fmtDepMill(d.saldo)}}</td>
-                        <td></td>
-                        <td></td>
-                    </tr>`;
-                }});
             }});
             thtml += `<tr class="dep-total-row">
                 <td>TOTAL DEPOSITOS</td>
@@ -12333,8 +13643,40 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
 
         function inicializarGraficoDepositos() {{
             const modo = DEPOSITOS_STATE.modo;
+            const idx = DEPOSITOS_STATE.idxActual;
+            const r = DATOS_DEPOSITOS[idx];
             const etiquetas = DATOS_DEPOSITOS.map(r => `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0,3)}}-${{String(r.anio).substring(2)}}`);
             const etiquetasLargas = DATOS_DEPOSITOS.map(r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`);
+
+            // Destruir gráficos previos (al cambiar de modo cambia la cantidad)
+            Object.keys(DEPOSITOS_STATE.charts).forEach(k => {{
+                if (DEPOSITOS_STATE.charts[k]) {{ DEPOSITOS_STATE.charts[k].destroy(); DEPOSITOS_STATE.charts[k] = null; }}
+            }});
+
+            const items = depProductosVisibles(modo);
+
+            // Construir la cuadrícula dinámicamente (4 productos en Total, 5 en Capital)
+            const grid = document.getElementById('depositos-grid-productos');
+            grid.innerHTML = items.map(item => `
+                <div class="dep-mini-card dep-chart-box">
+                    <div class="dep-chart-tag dep-mini-tag" id="dep-tag-${{item.id}}"></div>
+                    <div class="historico-flex-wrap">
+                        <div class="historico-eje-fijo historico-eje-fijo-small">
+                            <div id="chartDep-${{item.id}}-axis-container" class="eje-y-html-container"></div>
+                        </div>
+                        <div class="chart-scroll-container" id="dep-${{item.id}}-scroll-container">
+                            <div class="chart-inner dep-mini-inner" id="dep-${{item.id}}-inner">
+                                <canvas id="chartDep-${{item.id}}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>`).join('');
+
+            // Reconstruir el mapa de IDs de scroll (total + items visibles)
+            DEP_SCROLL_IDS = [{{ scroll: 'depositosTotal-scroll-container', inner: 'depositosTotal-inner' }}];
+            items.forEach(item => DEP_SCROLL_IDS.push({{
+                scroll: 'dep-' + item.id + '-scroll-container', inner: 'dep-' + item.id + '-inner'
+            }}));
 
             ajustarAnchoCanvasDepositos();
 
@@ -12344,28 +13686,27 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 'chartDepositosTotal-axis-container', etiquetas, etiquetasLargas, DEPOSITOS_STATE.charts, 'total');
             DEPOSITOS_STATE.chartTotal = DEPOSITOS_STATE.charts.total;
 
-            // 4 gráficos por producto (cuadrícula 2x2)
-            DEP_PRODUCTOS.forEach(prod => {{
-                const serie = depSerieProducto(prod.id, modo);
-                const color = DEP_COLORS[prod.id];
-                // pintar el punto de color del título de la mini-card
-                const punto = document.getElementById('dep-mini-punto-' + prod.id);
-                if (punto) punto.style.background = color;
-                crearGraficoLineaDep('chartDep-' + prod.id, serie, color,
-                    'chartDep-' + prod.id + '-axis-container', etiquetas, etiquetasLargas,
-                    DEPOSITOS_STATE.charts, prod.id);
+            // Un gráfico por item visible + su etiqueta integrada
+            items.forEach(item => {{
+                const serie = depSerieItem(item, modo);
+                const crecSerie = depCrecimientoMensual(serie);
+                const color = DEP_COLORS[item.id] || '#64748b';
+                const val = r ? depSaldoItem(r, item, modo) : 0;
+                // Etiqueta integrada del mini-gráfico
+                const tag = document.getElementById('dep-tag-' + item.id);
+                if (tag) tag.outerHTML = _depTagHTML(item.nombre, color, val, crecSerie[idx], true)
+                    .replace('class="dep-chart-tag dep-mini-tag"', 'class="dep-chart-tag dep-mini-tag" id="dep-tag-' + item.id + '"');
+                crearGraficoLineaDep('chartDep-' + item.id, serie, color,
+                    'chartDep-' + item.id + '-axis-container', etiquetas, etiquetasLargas,
+                    DEPOSITOS_STATE.charts, item.id);
             }});
 
             setTimeout(() => scrollAlPeriodoDepositos(DEPOSITOS_STATE.idxActual), 100);
         }}
 
-        // IDs de todos los contenedores scroll/inner (total + 4 productos)
-        const DEP_SCROLL_IDS = [
+        // IDs de contenedores scroll/inner (se reconstruye en cada init según el modo)
+        let DEP_SCROLL_IDS = [
             {{ scroll: 'depositosTotal-scroll-container', inner: 'depositosTotal-inner' }},
-            {{ scroll: 'dep-ahorro_vista-scroll-container', inner: 'dep-ahorro_vista-inner' }},
-            {{ scroll: 'dep-cdat-scroll-container', inner: 'dep-cdat-inner' }},
-            {{ scroll: 'dep-contractual-scroll-container', inner: 'dep-contractual-inner' }},
-            {{ scroll: 'dep-daes-scroll-container', inner: 'dep-daes-inner' }},
         ];
 
         function ajustarAnchoCanvasDepositos() {{
@@ -12403,49 +13744,50 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 wb.creator = 'Dashboard Cooperativo';
                 const modo = DEPOSITOS_STATE.modo;
                 const labelSaldo = modo === 'capital' ? 'Saldo Capital' : 'Saldo Total';
+                const itemsXls = depProductosVisibles(modo);
                 const ws = wb.addWorksheet('Resumen');
+                // Columnas: Periodo + un producto por item visible + Total + Crecimiento
                 ws.columns = [
                     {{ header: 'Periodo', width: 16 }},
-                    {{ header: 'Ahorro a la Vista', width: 18 }},
-                    {{ header: 'CDAT', width: 16 }},
-                    {{ header: 'Ahorro Contractual', width: 18 }},
-                    {{ header: 'DAES', width: 16 }},
+                    ...itemsXls.map(it => ({{ header: it.nombre, width: 18 }})),
                     {{ header: 'Total Depositos', width: 18 }},
                     {{ header: 'Crec. Mensual %', width: 16 }},
                 ];
+                const nCols = itemsXls.length;
+                const colTotal = nCols + 2;  // índice (1-based) de la columna Total
+                const letras = (n) => {{ let s=''; n--; while(n>=0){{ s=String.fromCharCode(65+(n%26))+s; n=Math.floor(n/26)-1; }} return s; }};
                 DATOS_DEPOSITOS.forEach((r, i) => {{
-                    const get = (id) => {{ const p = r.productos.find(x => x.id === id); return p ? depSaldoProducto(p, modo) : 0; }};
-                    ws.addRow([
-                        `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`,
-                        get('ahorro_vista'), get('cdat'), get('contractual'), get('daes'),
-                        {{ formula: `B${{i+2}}+C${{i+2}}+D${{i+2}}+E${{i+2}}` }},
-                        i === 0 ? null : {{ formula: `IFERROR((F${{i+2}}/F${{i+1}}-1)*100,0)` }}
-                    ]);
+                    const fila = [`${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`];
+                    itemsXls.forEach(it => fila.push(depSaldoItem(r, it, modo)));
+                    // Total = suma de columnas de productos (B..)
+                    const rng = `${{letras(2)}}${{i+2}}:${{letras(nCols+1)}}${{i+2}}`;
+                    fila.push({{ formula: `SUM(${{rng}})` }});
+                    const cT = letras(colTotal);
+                    fila.push(i === 0 ? null : {{ formula: `IFERROR((${{cT}}${{i+2}}/${{cT}}${{i+1}}-1)*100,0)` }});
+                    ws.addRow(fila);
                 }});
-                ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFB45309' }} }};
-                ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFFFF7ED' }} }};
-                [2,3,4,5,6].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-                ws.getColumn(7).numFmt = '0.00"%"';
+                ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
+                ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF088DD5' }} }};
+                for (let c = 2; c <= colTotal; c++) ws.getColumn(c).numFmt = '#,##0.00';
+                ws.getColumn(colTotal + 1).numFmt = '0.00"%"';
                 ws.views = [{{ state: 'frozen', ySplit: 1 }}];
                 
                 const r = DATOS_DEPOSITOS[DEPOSITOS_STATE.idxActual];
                 const wsD = wb.addWorksheet('Detalle periodo');
                 wsD.columns = [{{ header: 'Producto / Subcuenta', width: 36 }}, {{ header: 'Cuenta', width: 14 }}, {{ header: labelSaldo, width: 18 }}];
-                const t = wsD.addRow([`Detalle ${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`, '', '']);
-                t.font = {{ bold: true, size: 13, color: {{ argb: 'FFB45309' }} }};
+                const t = wsD.addRow([`Detalle ${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}} - ${{labelSaldo}}`, '', '']);
+                t.font = {{ bold: true, size: 13, color: {{ argb: 'FF088DD5' }} }};
                 wsD.addRow([]);
                 const hdr = wsD.addRow(['Producto / Subcuenta', 'Cuenta', labelSaldo]);
                 hdr.font = {{ bold: true }};
-                hdr.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFFFF7ED' }} }};
-                r.productos.forEach(p => {{
-                    const pr = wsD.addRow([p.nombre, p.cuenta_total, depSaldoProducto(p, modo)]);
+                hdr.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFE8F2FA' }} }};
+                itemsXls.forEach(it => {{
+                    const cuenta = it.esComponente ? it.id : '';
+                    const pr = wsD.addRow([it.nombre, '', depSaldoItem(r, it, modo)]);
                     pr.font = {{ bold: true }};
-                    (p.discriminado || []).forEach(d => {{
-                        wsD.addRow([`    ${{d.nombre}}`, d.codigo, d.saldo]);
-                    }});
                 }});
                 const totRow = wsD.addRow(['TOTAL DEPOSITOS', '', modo === 'capital' ? r.total_capital : r.total_depositos]);
-                totRow.font = {{ bold: true, color: {{ argb: 'FFB45309' }} }};
+                totRow.font = {{ bold: true, color: {{ argb: 'FF088DD5' }} }};
                 wsD.getColumn(3).numFmt = '#,##0.00';
                 
                 const buf = await wb.xlsx.writeBuffer();
@@ -13837,12 +15179,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             
-            // Eje Y HTML fijo basado en el max de las 3 series de barras
-            const maxBarras = Math.max(...serie.ingresos, ...serie.costos, ...serie.gastos, 0);
-            sincronizarEjeYHistorico([0, maxBarras], 'chartICG-axis-container', {{
+            // Eje Y HTML ajustado al rango real de TODAS las series (barras + línea Excedente)
+            const todasICG = [...serie.ingresos, ...serie.costos, ...serie.gastos, ...serie.excedente]
+                .filter(v => v !== null && v !== undefined && !isNaN(v));
+            aplicarEjeAlChart(ICG_STATE.chart, sincronizarEjeYHistorico(todasICG, 'chartICG-axis-container', {{
                 tituloEje: 'Millones COP',
                 formatter: fmtMillICGEs
-            }});
+            }}));
         }}
         
         // =========== GRÁFICO MENSUAL (valores aislados del mes) ===========
@@ -13939,12 +15282,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }}
             }});
             
-            // Eje Y HTML fijo basado en el max de las 3 series mensuales
-            const maxBarras = Math.max(...serie.ingresos, ...serie.costos, ...serie.gastos, 0);
-            sincronizarEjeYHistorico([0, maxBarras], 'chartICGMensual-axis-container', {{
+            // Eje Y HTML ajustado al rango real de TODAS las series mensuales
+            const todasICGM = [...serie.ingresos, ...serie.costos, ...serie.gastos, ...serie.excedente]
+                .filter(v => v !== null && v !== undefined && !isNaN(v));
+            aplicarEjeAlChart(ICG_STATE.chartMensual, sincronizarEjeYHistorico(todasICGM, 'chartICGMensual-axis-container', {{
                 tituloEje: 'Millones COP',
                 formatter: fmtMillICGEs
-            }});
+            }}));
         }}
         
         function ajustarAnchoCanvasICGMensual() {{
@@ -14981,6 +16325,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const r = DATOS_EVOLUCION_PATRIMONIO.find(x => x.anio === anio && x.mes === mes);
             return r ? (r.saldo_actual || 0) : 0;
         }}
+        function rentActivoTotal(anio, mes) {{
+            // Activo total = cuenta 1. Se toma de DATOS_INDICADORES (cta_1, 60 períodos).
+            if (typeof DATOS_INDICADORES === 'undefined') return 0;
+            const r = DATOS_INDICADORES.find(x => x.anio === anio && x.mes === mes);
+            return r ? (r.cta_1 || 0) : 0;
+        }}
         function rentPasivo21(anio, mes) {{
             if (typeof DATOS_EVOLUCION_PASIVO === 'undefined') return 0;
             return rentSaldoSubcuenta(DATOS_EVOLUCION_PASIVO, anio, mes, '21');
@@ -15011,6 +16361,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             let roe = null;
             if (patrProm > 0 && n > 0) {{
                 roe = Math.pow(1 + (excedente / (patrProm * n)), n) - 1;
+            }}
+            
+            // ROA: igual que ROE pero sobre el ACTIVO promedio (cuenta 1).
+            // activo promedio = (Activo_mismo_mes_actual + Activo_mismo_mes_año_ant) / 2
+            const actAct        = rentActivoTotal(anio, mes);
+            const actMesAnioAnt = rentActivoTotal(anio - 1, mes);
+            const actProm = actMesAnioAnt > 0 ? (actAct + actMesAnioAnt) / 2 : actAct;
+            let roa = null;
+            if (actProm > 0 && n > 0) {{
+                roa = Math.pow(1 + (excedente / (actProm * n)), n) - 1;
             }}
             
             // Margen Neto = 53 / (41 + 4225)  (sin anualizar)
@@ -15047,10 +16407,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }}
             
             return {{
-                roe, margen, roic,
+                roe, margen, roic, roa,
                 inputs: {{
                     n, excedente,
                     patrAct, patrMesAnioAnt, patrProm,
+                    actAct, actMesAnioAnt, actProm,
                     ing41, ing4225, denomMargen,
                     pas21Act, pas21MesAnt, promDepositos,
                     pas23Act, pas23MesAnt, promObligaciones,
@@ -15334,18 +16695,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             RENT_STATE.charts.margen = crearGraficoIndicadorRent('margen', serie.margen, RENT_PALETTE.margen);
             RENT_STATE.charts.roic   = crearGraficoIndicadorRent('roic',   serie.roic,   RENT_PALETTE.roic);
             
-            // Eje Y HTML individual por indicador (rango propio desde 0)
-            const renderEje = (datos, containerId, titulo) => {{
+            // Eje Y HTML individual por indicador, ajustado a su rango real (mín y máx)
+            const renderEje = (datos, containerId, titulo, chartKey) => {{
                 const pct = datos.filter(v => v != null).map(v => v * 100);
                 if (pct.length === 0) return;
-                sincronizarEjeYHistorico([0, Math.max(...pct)], containerId, {{
+                aplicarEjeAlChart(RENT_STATE.charts[chartKey], sincronizarEjeYHistorico(pct, containerId, {{
                     tituloEje: titulo,
                     formatter: (v) => v.toFixed(0) + '%'
-                }});
+                }}));
             }};
-            renderEje(serie.roe,    'chartRoe-axis-container',    'ROE (%)');
-            renderEje(serie.margen, 'chartMargen-axis-container', 'Margen (%)');
-            renderEje(serie.roic,   'chartRoic-axis-container',   'ROIC (%)');
+            renderEje(serie.roe,    'chartRoe-axis-container',    'ROE (%)',    'roe');
+            renderEje(serie.margen, 'chartMargen-axis-container', 'Margen (%)', 'margen');
+            renderEje(serie.roic,   'chartRoic-axis-container',   'ROIC (%)',   'roic');
         }}
         
         // ====== EXCEL AUDITABLE DEL MÓDULO RENTABILIDAD ======
@@ -15813,10 +17174,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const numLimpio = config.numSerie.map(v => (v === null || v === undefined) ? 0 : v);
             const denLimpio = config.denSerie.map(v => (v === null || v === undefined) ? 0 : v);
             
-            // Calcular valor máximo defensivamente
+            // Eje ajustado al rango real de las series (mín y máx), con escala "bonita".
             const todos = [...numLimpio, ...denLimpio].filter(v => typeof v === 'number' && !isNaN(v));
-            const maxValor = todos.length > 0 ? Math.max(...todos) : 1;
-            const maxConPadding = maxValor * 1.15;
+            const ejeComp = _rangoEjeAjustado(todos);
+            const ejeMin = ejeComp.niceMin;
+            const ejeMax = ejeComp.niceMax;
             
             // Si hay axisContainerId, este gráfico va sin eje Y (lo dibuja el HTML overlay)
             const ocultarEjeY = !!config.axisContainerId;
@@ -15876,8 +17238,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     }},
                     scales: {{
                         y: {{
-                            beginAtZero: true,
-                            max: maxConPadding,
+                            beginAtZero: (ejeMin === 0),
+                            min: ejeMin,
+                            max: ejeMax,
                             display: !ocultarEjeY,
                             position: 'left',
                             grid: {{
@@ -15923,8 +17286,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             
             // Si se pidió un eje Y separado, dibujarlo con HTML/CSS (más robusto que canvas)
             if (config.axisContainerId) {{
-                renderEjeYHTML(config.axisContainerId, maxConPadding, fmtMillonesEs, {{
-                    tituloEje: 'Millones de pesos (COP)'
+                renderEjeYHTML(config.axisContainerId, ejeMax, fmtMillonesEs, {{
+                    tituloEje: 'Millones de pesos (COP)',
+                    minValue: ejeMin
                 }});
             }}
             
@@ -15993,6 +17357,42 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // Para los gráficos históricos, los valores son porcentajes (ej: 0%, 5%, 10%).
         // Aplica el min/max calculado por el eje HTML al eje Y (oculto) del chart,
         // para que la línea y el eje HTML queden perfectamente alineados.
+        // Calcula un rango de eje [niceMin, niceMax] SIEMPRE ajustado a la banda
+        // de datos (mín y máx), con escala redondeada. Pensado para los gráficos
+        // de barras donde se pidió que NO arranquen en 0.
+        function _rangoEjeAjustado(valores) {{
+            const vals = (valores || []).filter(v => v !== null && v !== undefined && !isNaN(v));
+            if (vals.length === 0) return {{ niceMin: 0, niceMax: 10 }};
+            const minS = Math.min(...vals);
+            const maxS = Math.max(...vals);
+            const rango = maxS - minS;
+            let minEje, maxEje;
+            if (minS < 0) {{
+                const absMax = Math.max(Math.abs(minS), Math.abs(maxS));
+                minEje = -absMax * 1.12; maxEje = absMax * 1.12;
+            }} else if (rango < 1e-9) {{
+                // Todos los valores iguales: banda alrededor del valor
+                minEje = Math.max(0, minS * 0.9); maxEje = maxS * 1.1 || 1;
+            }} else {{
+                // Margen del 25% del rango a cada lado, sin bajar de 0
+                const margen = rango * 0.25;
+                minEje = Math.max(0, minS - margen);
+                maxEje = maxS + margen;
+            }}
+            // Redondear a escala "bonita"
+            const span = maxEje - minEje;
+            const mag = Math.pow(10, Math.floor(Math.log10(span || 1)));
+            const norm = (span / 5) / mag;
+            let step;
+            if (norm < 1.5) step = 1 * mag;
+            else if (norm < 3) step = 2 * mag;
+            else if (norm < 7) step = 5 * mag;
+            else step = 10 * mag;
+            const niceMin = Math.floor(minEje / step) * step;
+            const niceMax = Math.ceil(maxEje / step) * step;
+            return {{ niceMin: niceMin, niceMax: niceMax }};
+        }}
+        
         function aplicarEjeAlChart(chart, ejeInfo) {{
             if (!chart || !ejeInfo) return;
             if (!chart.options.scales) chart.options.scales = {{}};
@@ -16000,6 +17400,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             chart.options.scales.y.min = ejeInfo.niceMin;
             chart.options.scales.y.max = ejeInfo.niceMax;
             chart.options.scales.y.beginAtZero = (ejeInfo.niceMin === 0);
+            chart.options.scales.y.grace = 0;  // el rango ya viene calculado, sin padding extra
             chart.update('none');
         }}
         
@@ -18718,17 +20119,43 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             // ===== Indicadores de rentabilidad (en %) =====
             // Excedente y bases vienen de ICG / evolución. Alineados por índice de período.
             const SERIE_ROE = DATOS_ICG.map((r, i) => {{
-                const pat = DATOS_EVOLUCION_PATRIMONIO[i]?.saldo_actual;
-                return (pat && pat !== 0) ? (r.excedente / pat) * 100 : null;
+                const c = calcularRentabilidadPeriodo(i);
+                return (c && c.roe !== null && c.roe !== undefined) ? c.roe * 100 : null;
             }});
             const SERIE_ROA = DATOS_ICG.map((r, i) => {{
-                const act = DATOS_EVOLUCION_ACTIVO[i]?.saldo_actual;
-                return (act && act !== 0) ? (r.excedente / act) * 100 : null;
+                const c = calcularRentabilidadPeriodo(i);
+                return (c && c.roa !== null && c.roa !== undefined) ? c.roa * 100 : null;
             }});
-            const SERIE_MARGEN = DATOS_ICG.map(r =>
-                (r.ingresos && r.ingresos !== 0) ? (r.excedente / r.ingresos) * 100 : null);
+            const SERIE_MARGEN = DATOS_ICG.map((r, i) => {{
+                const c = calcularRentabilidadPeriodo(i);
+                return (c && c.margen !== null && c.margen !== undefined) ? c.margen * 100 : null;
+            }});
             const SERIE_EFICIENCIA = DATOS_ICG.map(r =>
                 (r.ingresos && r.ingresos !== 0) ? (r.gastos_sin_excedente / r.ingresos) * 100 : null);
+            
+            // ===== Series de los indicadores nuevos (para el tablero) =====
+            const _div = (n, d) => (d && d !== 0) ? (n / d) * 100 : null;
+            const SERIE_MARGEN_TOTAL = DATOS_INDICADORES.map(r => _div(r.cta_35, r.cta_4));
+            const SERIE_SUFICIENCIA  = DATOS_SUFICIENCIA.map(d => d.ratio);
+            const SERIE_ROIC = DATOS_ICG.map((r, i) => {{
+                const c = calcularRentabilidadPeriodo(i);
+                return (c && c.roic !== null && c.roic !== undefined) ? c.roic * 100 : null;
+            }});
+            const SERIE_CARTERA_ACTIVO = DATOS_INDICADORES.map(r => _div(r.cta_14, r.cta_1));
+            const SERIE_CARTERA_TOTAL_ACTIVO = DATOS_INDICADORES.map(r => _div(r.cartera_total, r.cta_1));
+            const SERIE_DEP_PASIVO   = DATOS_INDICADORES.map(r => _div(r.cta_21, r.cta_2));
+            const SERIE_DEP_CARTERA  = DATOS_INDICADORES.map(r => _div(r.cta_21, r.cta_14));
+            const SERIE_QUEBRANTO    = DATOS_QUEBRANTO.map(d => d.ratio);
+            const SERIE_CAPITAL_INST = DATOS_CAPITAL_INST.map(d => d.ratio);
+            // Saldos de depósitos por tipo (saldo total de cada producto, por período)
+            const _depTipoSerie = (id) => DATOS_DEPOSITOS.map(r => {{
+                const p = r.productos.find(x => x.id === id);
+                return p ? p.saldo_total : 0;
+            }});
+            const SERIE_DEP_AHORRO_VISTA = _depTipoSerie('ahorro_vista');
+            const SERIE_DEP_CDAT         = _depTipoSerie('cdat');
+            const SERIE_DEP_CONTRACTUAL  = _depTipoSerie('contractual');
+            const SERIE_DEP_DAES         = _depTipoSerie('daes');
             
             // Índice del primer mes "comparable" para ICG/rentabilidad:
             // como son acumulados YTD, la variación arranca en el 2º mes del primer año fiscal disponible.
@@ -18741,15 +20168,25 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const FILAS_PCT = [
                 {{ seccion: 'Solvencia y Liquidez' }},
                 {{ nombre: 'Solvencia', modulo: 'Solvencia', serie: SERIE_SOLVENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#17A53D', click: 'abrirSolvencia' }},
-                {{ seccion: 'Calidad de Cartera' }},
+                {{ seccion: 'Activo' }},
                 {{ nombre: 'Índice de Mora', modulo: 'Activo · Mora', serie: SERIE_INDICE_MORA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#C91A15', click: 'abrirIndiceMora' }},
                 {{ nombre: 'Calidad de Cartera', modulo: 'Activo · Riesgo', serie: SERIE_CALIDAD_CARTERA, fmt: fmtPct, unidad: 'pb', modo: 'bueno_bajo', invertir: true, punto: '#045988', click: 'abrirIndiceRiesgo' }},
                 {{ nombre: 'Cobertura', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_TOTAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#36BAA8', click: 'abrirCobertura' }},
                 {{ nombre: 'Cobertura c/Prov. Gral', modulo: 'Activo · Cobertura', serie: SERIE_COBERTURA_CON_GRAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#237C70', click: 'abrirCobertura' }},
-                {{ seccion: 'Rentabilidad' }},
-                {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F78502', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#A75A00', click: 'abrirEvolucionICG' }},
-                {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F6A141', click: 'abrirEvolucionICG' }},
+                {{ nombre: 'Cartera sobre Activo', modulo: 'Cartera créditos / Activo', serie: SERIE_CARTERA_ACTIVO, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#237C70', click: 'abrirCarteraActivo' }},
+                {{ seccion: 'Pasivo y Depósitos' }},
+                {{ nombre: 'Depósitos sobre Pasivo', modulo: 'Depósitos / Pasivo', serie: SERIE_DEP_PASIVO, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#045988', click: 'abrirDepositosPasivo' }},
+                {{ nombre: 'Depósitos sobre Cartera', modulo: 'Depósitos / Cartera créditos', serie: SERIE_DEP_CARTERA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#0670A8', click: 'abrirDepositosCartera' }},
+                {{ seccion: 'Patrimonio' }},
+                {{ nombre: 'Quebranto Patrimonial', modulo: 'Patrimonio / Capital Social', serie: SERIE_QUEBRANTO, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#6039A3', click: 'abrirQuebranto' }},
+                {{ nombre: 'Capital Institucional', modulo: '(32+33+34) / Activo', serie: SERIE_CAPITAL_INST, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#4D61B4', click: 'abrirCapitalInstitucional' }},
+                {{ seccion: 'Ingresos, Costos y Gastos' }},
+                {{ nombre: 'Margen Total', modulo: 'Excedentes (35) / Ingresos (4)', serie: SERIE_MARGEN_TOTAL, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#11782C', click: 'abrirMargenTotal' }},
+                {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F6A141', click: 'abrirRendMn' }},
+                {{ nombre: 'Suficiencia del Margen', modulo: 'Margen Fin. / Gastos op.', serie: SERIE_SUFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#1FA64A', click: 'abrirSuficiencia' }},
+                {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F78502', click: 'abrirRendRoe' }},
+                {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#A75A00', click: 'abrirRendRoa' }},
+                {{ nombre: 'ROIC · Rent. Capital Inv.', modulo: 'Excedente / Capital invertido', serie: SERIE_ROIC, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#9B86C0', click: 'abrirRendRoic' }},
                 {{ nombre: 'Eficiencia', modulo: 'Gastos / Ingresos', serie: SERIE_EFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, varDesdeFebrero: true, punto: '#CC6A02', click: 'abrirEvolucionICG' }},
             ];
             
@@ -18764,6 +20201,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 {{ seccion: 'Estructura — Pasivo' }},
                 {{ nombre: 'Pasivo', modulo: 'Pasivo', serie: SERIE_EVOLUCION_PASIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#088DD5', punto: '#088DD5', click: 'abrirEvolucionPasivo' }},
                 {{ nombre: 'Depósitos', modulo: 'Pasivo · Cuenta 21', serie: SERIE_DEPOSITOS_21, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirEvolucionPasivo' }},
+                {{ seccion: 'Depósitos por tipo' }},
+                {{ nombre: 'Ahorro a la Vista', modulo: 'Depósitos · Saldo total', serie: SERIE_DEP_AHORRO_VISTA, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#2CAAEE', punto: '#2CAAEE', click: 'abrirCrecimientoDepositos' }},
+                {{ nombre: 'CDAT', modulo: 'Depósitos · Saldo total', serie: SERIE_DEP_CDAT, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#088DD5', punto: '#088DD5', click: 'abrirCrecimientoDepositos' }},
+                {{ nombre: 'Ahorro Contractual', modulo: 'Depósitos · Saldo total', serie: SERIE_DEP_CONTRACTUAL, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#0670A8', punto: '#0670A8', click: 'abrirCrecimientoDepositos' }},
+                {{ nombre: 'DAES', modulo: 'Depósitos · Saldo total', serie: SERIE_DEP_DAES, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirCrecimientoDepositos' }},
                 {{ seccion: 'Estructura — Patrimonio' }},
                 {{ nombre: 'Patrimonio', modulo: 'Patrimonio', serie: SERIE_EVOLUCION_PATRIMONIO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#6039A3', punto: '#6039A3', click: 'abrirEvolucionPatrimonio' }},
                 {{ nombre: 'Capital Social', modulo: 'Patrimonio · Cuenta 31', serie: SERIE_CAPITAL_31, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#7F5ABF', punto: '#7F5ABF', click: 'abrirEvolucionPatrimonio' }},
@@ -18795,16 +20237,26 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 
                 // TBODY
                 let tbody = '<tbody>';
+                let grupoIdx = -1;  // índice de la sección actual
+                const prefijo = tablaId.replace('-tabla', '');
                 filas.forEach(fila => {{
                     if (fila.seccion) {{
-                        tbody += `<tr class="matriz-seccion-row"><td colspan="${{N + 1}}">${{fila.seccion}}</td></tr>`;
+                        grupoIdx++;
+                        const gid = `${{prefijo}}-grp-${{grupoIdx}}`;
+                        tbody += `<tr class="matriz-seccion-row matriz-seccion-toggle" data-grupo-head="${{gid}}" onclick="toggleSeccionMatriz('${{gid}}', this)">
+                            <td colspan="${{N + 1}}">
+                                <span class="matriz-seccion-chevron">▼</span>
+                                <span class="matriz-seccion-nombre">${{fila.seccion}}</span>
+                            </td>
+                        </tr>`;
                         return;
                     }}
+                    const gid = `${{prefijo}}-grp-${{grupoIdx}}`;
                     const valores = fila.serie.filter(v => v !== null && v !== undefined);
                     const min = Math.min(...valores);
                     const max = Math.max(...valores);
                     
-                    tbody += `<tr class="matriz-fila" onclick="${{fila.click}}()">`;
+                    tbody += `<tr class="matriz-fila" data-grupo="${{gid}}" onclick="${{fila.click}}()">`;
                     tbody += `<td class="col-indicador">
                         <div class="col-indicador-inner">
                             <span class="col-indicador-punto" style="background:${{fila.punto}}"></span>
@@ -18839,6 +20291,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 
                 tabla.innerHTML = thead + tbody;
             }}
+            
+            // Colapsa/expande una sección del tablero de forma independiente
+            window.toggleSeccionMatriz = function(gid, headRow) {{
+                const filas = document.querySelectorAll(`tr[data-grupo="${{gid}}"]`);
+                const colapsada = headRow.classList.toggle('colapsada');
+                filas.forEach(f => {{ f.style.display = colapsada ? 'none' : ''; }});
+            }};
             
             construirMatriz('matriz-pct-tabla', FILAS_PCT);
             construirMatriz('matriz-money-tabla', FILAS_MONEY);
@@ -19174,6 +20633,26 @@ def main():
         if i % 10 == 0 or i == n_total:
             print(f"   ... {i}/{n_total} calculados ({rd['periodo']})")
     
+    # Series para los nuevos indicadores (cuentas directas del balance por período)
+    print(f"\nCalculando indicadores adicionales (Margen total, Cartera/Activo, Depositos/Pasivo, Depositos/Cartera)...")
+    def _saldo_cta(anio, mes, cuenta):
+        dfp = df[(df["AÑO"] == anio) & (df["MES"] == mes.upper())]
+        return dfp[dfp["CUENTA"] == cuenta]["NUEVO SALDO"].abs().sum() / 1_000_000
+    series_indicadores = []
+    _ctas_cartera_bruta = ["1404","1405","1411","1412","1441","1442","1448","1454","1455","1461","1462","1469"]
+    for (anio, mes) in periodos:
+        cartera_bruta_tot = sum(_saldo_cta(anio, mes, c) for c in _ctas_cartera_bruta)
+        series_indicadores.append({
+            "anio": anio, "mes": mes.upper(),
+            "cta_35": round(_saldo_cta(anio, mes, "35"), 2),   # Excedentes y/o pérdidas del ejercicio
+            "cta_4":  round(_saldo_cta(anio, mes, "4"), 2),    # Ingresos
+            "cta_1":  round(_saldo_cta(anio, mes, "1"), 2),    # Activo total
+            "cta_2":  round(_saldo_cta(anio, mes, "2"), 2),    # Pasivo total
+            "cta_14": round(_saldo_cta(anio, mes, "14"), 2),   # Cartera de Créditos
+            "cta_21": round(_saldo_cta(anio, mes, "21"), 2),   # Depósitos
+            "cartera_total": round(cartera_bruta_tot, 2),       # Cartera Total (suma cuentas brutas 14xx)
+        })
+    
     r = todos_resultados[-1]
     rm = todos_morosidad[-1]
     rr = todos_riesgo[-1]
@@ -19210,6 +20689,7 @@ def main():
                  todos_evolucion_patrimonio=todos_evolucion_patrimonio,
                  todos_icg=todos_icg,
                  todos_depositos=todos_depositos,
+                 series_indicadores=series_indicadores,
                  catalogo_cuentas=catalogo_cuentas)
     print(f"   OK: {ruta_html.name}")
     
