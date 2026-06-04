@@ -28,6 +28,8 @@ CÓMO EDITAR EL MODELO:
 import sys
 import json
 import webbrowser
+import subprocess
+import shutil
 from pathlib import Path
 from textwrap import dedent
 
@@ -900,9 +902,9 @@ def calcular_riesgo(df: pd.DataFrame, anio: int, mes: str) -> dict:
         1404, 1405, 1411, 1412, 1441, 1442, 1448, 1454, 1455, 1461, 1462, 1469
       - Categorías B-E: cuentas 6 dígitos terminadas en 10, 15, 20, 25
         (riesgo aceptable, apreciable, significativo, incobrabilidad)
-      - Categoría A = Cartera Total − (B+C+D+E)
+      - Categoría A = Cartera Capital − (B+C+D+E)
       
-    Calidad de cartera = (B + C + D + E) / Cartera Total
+    Calidad de cartera = (B + C + D + E) / Cartera Capital
     """
     df_p = df[(df["AÑO"] == anio) & (df["MES"] == mes.upper())]
     
@@ -1311,7 +1313,7 @@ def calcular_crecimiento(df: pd.DataFrame, anio: int, mes: str) -> dict:
       4. Comercial (1461+1462)
       5. Microcrédito (1448+1454+1455)
       6. Vivienda (1404+1405+146905+...+146925)
-      7. Cartera Total por Riesgo (B+C+D+E de todas las modalidades)
+      7. Cartera Capital por Riesgo (B+C+D+E de todas las modalidades)
     
     Si no hay período anterior disponible (primer año), devuelve None en crecimiento.
     """
@@ -1389,7 +1391,7 @@ def calcular_crecimiento(df: pd.DataFrame, anio: int, mes: str) -> dict:
             **calc_crec(["1404","1405","146905","146910","146915","146920","146925"]),
         },
         "riesgo": {
-            "nombre": "Cartera Total por Riesgo",
+            "nombre": "Cartera Capital por Riesgo",
             "concepto": "Crecimiento Cartera en Riesgo (B+C+D+E)",
             "descripcion_formula": "(Cartera en riesgo período actual / Cartera en riesgo mismo período año anterior) − 1",
             "formula_texto": "Suma de categorías B,C,D,E de todas las modalidades (vencidas)",
@@ -1980,11 +1982,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     serie_solvencia_num = [round(x.get("patrimonio_tecnico", 0), 2) for x in todos_resultados]
     serie_solvencia_den = [round(x.get("apr_total", 0), 2) for x in todos_resultados]
     
-    # Mora: Mora Total (num) vs Cartera Total (den) — en M COP
+    # Mora: Mora Total (num) vs Cartera Capital (den) — en M COP
     serie_mora_num = [round(x["mora_total"], 2) for x in morosidad_json]
     serie_mora_den = [round(x["total_general"], 2) for x in morosidad_json]
     
-    # Riesgo: B+C+D+E (num) vs Cartera Total (den) — en M COP
+    # Riesgo: B+C+D+E (num) vs Cartera Capital (den) — en M COP
     serie_riesgo_num = [round(x["total_bcde"], 2) for x in riesgo_json]
     serie_riesgo_den = [round(x["cartera_total"], 2) for x in riesgo_json]
     
@@ -5608,7 +5610,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 box-shadow: 0 0 0 4px rgba(20,184,166,0.16), 0 8px 22px rgba(20,184,166,0.28);
             }}
             
-            /* Card especial para "Cartera Total por Riesgo" en el módulo Crecimiento */
+            /* Card especial para "Cartera Capital por Riesgo" en el módulo Crecimiento */
             .mod-riesgo-crec {{
                 --mod-color: #045988;
                 border-color: #93c5fd;
@@ -6609,7 +6611,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         </svg>
                     </div>
                     <h3 class="modulo-titulo">Cartera sobre Activo</h3>
-                    <p class="modulo-descripcion">Cartera sobre el Activo total (cuenta 1). Alterna entre Cartera de Créditos y Cartera Total.</p>
+                    <p class="modulo-descripcion">Cartera sobre el Activo total (cuenta 1). Alterna entre Cartera Neta y Cartera Capital.</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -6690,7 +6692,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         </svg>
                     </div>
                     <h3 class="modulo-titulo">Depósitos sobre Cartera</h3>
-                    <p class="modulo-descripcion">Depósitos (cuenta 21) sobre la Cartera. Alterna entre Cartera de Créditos y Cartera Total.</p>
+                    <p class="modulo-descripcion">Depósitos (cuenta 21) sobre la Cartera. Alterna entre Cartera Neta y Cartera Capital.</p>
                     <span class="modulo-accion">
                         Abrir módulo
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -7363,7 +7365,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </div>
                     <div class="gauge-status">
                         <div class="gauge-status-item">
-                            <span class="gauge-status-label">Cartera Total</span>
+                            <span class="gauge-status-label">Cartera Capital</span>
                             <span class="gauge-status-value" id="mora-cartera-total">--</span>
                         </div>
                         <div class="gauge-status-item">
@@ -7414,7 +7416,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             <div class="section seccion-composicion" style="--comp-color: #C91A15;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
-                    <span class="composicion-fmla">Mora Total / Cartera Total = Índice de Mora</span>
+                    <span class="composicion-fmla">Mora Total / Cartera Capital = Índice de Mora</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
@@ -7423,7 +7425,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                     <span class="composicion-leyenda-item">
                         <span class="composicion-leyenda-sq" style="background:#fca5a5;"></span>
-                        Cartera Total
+                        Cartera Capital
                     </span>
                 </div>
                 <div class="composicion-flex-wrap">
@@ -7527,7 +7529,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </div>
                     <div class="gauge-status">
                         <div class="gauge-status-item">
-                            <span class="gauge-status-label">Cartera Total</span>
+                            <span class="gauge-status-label">Cartera Capital</span>
                             <span class="gauge-status-value" id="riesgo-cartera-total">--</span>
                         </div>
                         <div class="gauge-status-item">
@@ -7578,7 +7580,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             <div class="section seccion-composicion" style="--comp-color: #045988;">
                 <div class="composicion-header">
                     <h2 class="section-title" style="margin: 0;">Composición del Cálculo</h2>
-                    <span class="composicion-fmla">Cartera (B+C+D+E) / Cartera Total = Calidad de Cartera</span>
+                    <span class="composicion-fmla">Cartera (B+C+D+E) / Cartera Capital = Calidad de Cartera</span>
                 </div>
                 <div class="composicion-leyenda">
                     <span class="composicion-leyenda-item">
@@ -7587,7 +7589,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                     <span class="composicion-leyenda-item">
                         <span class="composicion-leyenda-sq" style="background:#93c5fd;"></span>
-                        Cartera Total
+                        Cartera Capital
                     </span>
                 </div>
                 <div class="composicion-flex-wrap">
@@ -7845,7 +7847,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     <div class="kpi-sub" id="crecimiento-kpi-riesgo-sub">--</div>
                 </div>
             </div>
-            <p class="seccion-subtitulo" style="margin:0 0 6px;font-weight:700;color:#475569;">Estadísticas de la Cartera Total</p>
+            <p class="seccion-subtitulo" style="margin:0 0 6px;font-weight:700;color:#475569;">Estadísticas de la Cartera Capital</p>
             <div class="stats-fila" id="crecimiento-stats"></div>
             
             <!-- ===== EVOLUCIÓN HISTÓRICA DE CARTERA (estilo Depósitos) ===== -->
@@ -8431,10 +8433,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 </div>
                 <div class="header-acciones">
                     <div class="cobertura-toggle" id="cartera-activo-toggle">
-                        <span class="cobertura-toggle-titulo">TIPO DE CARTERA</span>
+                        <span class="cobertura-toggle-titulo">CARTERA DE CRÉDITOS</span>
                         <div class="cobertura-toggle-group">
                             <button class="cobertura-toggle-btn activo" data-cart="creditos" onclick="cambiarCarteraCartActivo('creditos')">Cartera Créditos</button>
-                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraCartActivo('total')">Cartera Total</button>
+                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraCartActivo('total')">Cartera Capital</button>
                         </div>
                     </div>
                     <div class="filtros">
@@ -8582,10 +8584,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 </div>
                 <div class="header-acciones">
                     <div class="cobertura-toggle" id="depositos-cartera-toggle">
-                        <span class="cobertura-toggle-titulo">TIPO DE CARTERA</span>
+                        <span class="cobertura-toggle-titulo">CARTERA DE CRÉDITOS</span>
                         <div class="cobertura-toggle-group">
                             <button class="cobertura-toggle-btn activo" data-cart="creditos" onclick="cambiarCarteraDepCartera('creditos')">Cartera Créditos</button>
-                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraDepCartera('total')">Cartera Total</button>
+                            <button class="cobertura-toggle-btn" data-cart="total" onclick="cambiarCarteraDepCartera('total')">Cartera Capital</button>
                         </div>
                     </div>
                     <div class="filtros">
@@ -11058,7 +11060,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             ws.getRow(1).height = 32;
             
             ws.mergeCells('A2:E2');
-            ws.getCell('A2').value = `Período: ${{r.periodo}}   ·   Fórmula: Mora Total (B+C+D+E) / Cartera Total`;
+            ws.getCell('A2').value = `Período: ${{r.periodo}}   ·   Fórmula: Mora Total (B+C+D+E) / Cartera Capital`;
             estilarCelda(ws.getCell('A2'), {{
                 italic: true, size: 11, color: COLOR.GRIS_MEDIO, fill: COLOR.GRIS_MUY_CLARO,
                 align: 'center', border: {{}}
@@ -11186,9 +11188,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
             fila++;
             
-            // Cartera Total
+            // Cartera Capital
             const refTotal = ['A','B','C','D','E'].map(c => `D${{filasSubtotales[c]}}`).join('+');
-            ws.getCell(fila, 1).value = 'Cartera Total';
+            ws.getCell(fila, 1).value = 'Cartera Capital';
             estilarCelda(ws.getCell(fila, 1), {{ bold: true, size: 11, fill: COLOR.BLANCO }});
             ws.mergeCells(`B${{fila}}:C${{fila}}`);
             ws.getCell(fila, 2).value = 'Sumatoria de cartera bruta';
@@ -11221,7 +11223,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 color: 'FF991B1B', align: 'left'
             }});
             ws.mergeCells(`B${{fila}}:C${{fila}}`);
-            ws.getCell(fila, 2).value = '= Mora Total / Cartera Total';
+            ws.getCell(fila, 2).value = '= Mora Total / Cartera Capital';
             estilarCelda(ws.getCell(fila, 2), {{
                 italic: true, size: 11, fill: 'FFFEE2E2',
                 color: 'FF991B1B', bold: true
@@ -11249,7 +11251,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             ws.getRow(1).height = 32;
             
             ws.mergeCells('A2:E2');
-            ws.getCell('A2').value = 'Fórmula: Mora Total (B+C+D+E) / Cartera Total';
+            ws.getCell('A2').value = 'Fórmula: Mora Total (B+C+D+E) / Cartera Capital';
             estilarCelda(ws.getCell('A2'), {{
                 italic: true, size: 11, color: COLOR.GRIS_MEDIO, fill: COLOR.GRIS_MUY_CLARO,
                 align: 'center', border: {{}}
@@ -11262,7 +11264,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             estiloSeccion(ws.getCell('A4'), 'FFDC2626');
             ws.getRow(4).height = 26;
             
-            const headers = ['Período', 'Mora Total (M)', 'Cartera Total (M)', 'Índice de Mora', 'Δ vs anterior'];
+            const headers = ['Período', 'Mora Total (M)', 'Cartera Capital (M)', 'Índice de Mora', 'Δ vs anterior'];
             headers.forEach((h, i) => {{
                 const c = ws.getCell(5, i + 1);
                 c.value = h;
@@ -11375,7 +11377,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             ws.getRow(1).height = 32;
             
             ws.mergeCells('A2:E2');
-            ws.getCell('A2').value = `Período: ${{r.periodo}}   ·   Fórmula: Cartera (B+C+D+E) / Cartera Total`;
+            ws.getCell('A2').value = `Período: ${{r.periodo}}   ·   Fórmula: Cartera (B+C+D+E) / Cartera Capital`;
             estilarCelda(ws.getCell('A2'), {{
                 italic: true, size: 11, color: COLOR.GRIS_MEDIO, fill: COLOR.GRIS_MUY_CLARO,
                 align: 'center', border: {{}}
@@ -11525,7 +11527,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const filaBCDE = fila;
             fila++;
             
-            ws.getCell(fila, 1).value = 'Cartera Total';
+            ws.getCell(fila, 1).value = 'Cartera Capital';
             estilarCelda(ws.getCell(fila, 1), {{ bold: true, size: 11, fill: COLOR.GRIS_CLARO }});
             ws.mergeCells(`B${{fila}}:C${{fila}}`);
             ws.getCell(fila, 2).value = 'Cartera Bruta (A + B + C + D + E)';
@@ -11542,7 +11544,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 bold: true, size: 13, fill: 'FFDBEAFE', color: 'FF1E3A8A', align: 'left'
             }});
             ws.mergeCells(`B${{fila}}:C${{fila}}`);
-            ws.getCell(fila, 2).value = '= (B+C+D+E) / Cartera Total';
+            ws.getCell(fila, 2).value = '= (B+C+D+E) / Cartera Capital';
             estilarCelda(ws.getCell(fila, 2), {{
                 italic: true, size: 11, fill: 'FFDBEAFE', color: 'FF1E3A8A', bold: true
             }});
@@ -11568,7 +11570,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             ws.getRow(1).height = 32;
             
             ws.mergeCells('A2:E2');
-            ws.getCell('A2').value = 'Fórmula: Cartera (B+C+D+E) / Cartera Total';
+            ws.getCell('A2').value = 'Fórmula: Cartera (B+C+D+E) / Cartera Capital';
             estilarCelda(ws.getCell('A2'), {{
                 italic: true, size: 11, color: COLOR.GRIS_MEDIO, fill: COLOR.GRIS_MUY_CLARO,
                 align: 'center', border: {{}}
@@ -11580,7 +11582,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             estiloSeccion(ws.getCell('A4'), 'FF1E40AF');
             ws.getRow(4).height = 26;
             
-            ['Período', 'B+C+D+E (M)', 'Cartera Total (M)', 'Calidad de Cartera', 'Δ vs anterior'].forEach((h, i) => {{
+            ['Período', 'B+C+D+E (M)', 'Cartera Capital (M)', 'Calidad de Cartera', 'Δ vs anterior'].forEach((h, i) => {{
                 const c = ws.getCell(5, i + 1);
                 c.value = h;
                 estiloHeaderCol(c);
@@ -12885,7 +12887,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // Todos en %, con división por cero protegida y eje ajustado.
         // ==========================================================
 
-        // Cartera Total por período (suma de cuentas brutas 14xx, calculada en Python).
+        // Cartera Capital por período (suma de cuentas brutas 14xx, calculada en Python).
         // ==========================================================
         // ===== GAUGE 0-100% DE 5 TRAMOS (mejor mientras más alto) =====
         // Mismo estilo/comportamiento que el gauge de Solvencia.
@@ -13116,22 +13118,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             document.getElementById('mgt-comp-final').textContent = fmtPctDirecto(r.ratio);
         }}
         async function descargarExcelMargenTotal() {{
-            const wb = new ExcelJS.Workbook();
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const ws = wb.addWorksheet('Margen Total');
-            ws.columns = [
-                {{ header: 'Período', key: 'p', width: 20 }},
-                {{ header: 'Excedentes/Pérdidas (35)', key: 'n', width: 24 }},
-                {{ header: 'Ingresos (4)', key: 'd', width: 18 }},
-                {{ header: 'Margen Total (35/4)', key: 'r', width: 20 }}
-            ];
-            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
-            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF11782C' }} }};
-            DATOS_MARGEN_TOTAL.forEach((d, i) => {{
-                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
-                const rn = i + 2;
-                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
-                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
-                row.getCell('r').numFmt = '0.00%';
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:15 }},{{ width:15 }},{{ width:15 }}];
+            ws.mergeCells('A1:D1');
+            Object.assign(ws.getCell('A1'), {{ value:'Margen Total · Excedentes (Cta 35) / Ingresos Totales (Cta 4)', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FF11782C' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:D2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: Margen Total = Excedentes o Pérdidas del Ejercicio (Cta 35) / Ingresos Totales (Cta 4)', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FFECFDF5' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('B4:D4'); _rentApplyGrpHdr(ws.getCell('B4'), 'MARGEN TOTAL — COMPOSICIÓN DEL CÁLCULO', 'FF11782C');
+            ws.getRow(4).height = 22;
+            ['Período','Excedentes/Pérdidas (Cta 35)','Ingresos Totales (Cta 4)','Margen Total %']
+                .forEach((h,i) => _rentApplyColHdr(ws.getCell(5, i+1), h));
+            ws.getRow(5).height = 32;
+            DATOS_MARGEN_TOTAL.forEach((d,i) => {{
+                const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), (MESES_NOMBRE[d.mes]||d.mes)+' '+d.anio, null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), d.num, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), d.den, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,4), 'IFERROR(B'+f+'/C'+f+',0)', '0.00%', true, 'FF11782C', fill);
             }});
             const buf = await wb.xlsx.writeBuffer();
             saveAs(new Blob([buf]), 'Margen_Total.xlsx');
@@ -13173,7 +13181,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function renderCarteraActivo() {{
             const datos = _datosCarteraActivo(CARTA_STATE.cartera), idx = CARTA_STATE.idx, r = datos[idx];
             const COLOR = '#237C70';
-            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Créditos';
+            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Capital' : 'Cartera Neta';
             const serie = datos.map(d => d.ratio);
             const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
             const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
@@ -13206,23 +13214,29 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         async function descargarExcelCarteraActivo() {{
             const datos = _datosCarteraActivo(CARTA_STATE.cartera);
-            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Creditos';
-            const wb = new ExcelJS.Workbook();
+            const nomCart = CARTA_STATE.cartera === 'total' ? 'Cartera Capital' : 'Cartera Neta';
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const ws = wb.addWorksheet('Cartera sobre Activo');
-            ws.columns = [
-                {{ header: 'Período', key: 'p', width: 20 }},
-                {{ header: nomCart, key: 'n', width: 22 }},
-                {{ header: 'Activo (1)', key: 'd', width: 18 }},
-                {{ header: 'Cartera / Activo', key: 'r', width: 20 }}
-            ];
-            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
-            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF237C70' }} }};
-            datos.forEach((d, i) => {{
-                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
-                const rn = i + 2;
-                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
-                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
-                row.getCell('r').numFmt = '0.00%';
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:20 }},{{ width:18 }},{{ width:18 }}];
+            ws.mergeCells('A1:D1');
+            Object.assign(ws.getCell('A1'), {{ value:'Cartera sobre Activo · '+nomCart+' / Activo Total (Cta 1)', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FF237C70' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:D2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: Cartera / Activo Total    |    Indica qué porcentaje del activo está colocado en cartera', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FFECFDF5' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('B4:D4'); _rentApplyGrpHdr(ws.getCell('B4'), 'CARTERA SOBRE ACTIVO — COMPOSICIÓN', 'FF237C70');
+            ws.getRow(4).height = 22;
+            ['Período', nomCart, 'Activo Total (Cta 1)', 'Cartera / Activo %']
+                .forEach((h,i) => _rentApplyColHdr(ws.getCell(5, i+1), h));
+            ws.getRow(5).height = 32;
+            datos.forEach((d,i) => {{
+                const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), (MESES_NOMBRE[d.mes]||d.mes)+' '+d.anio, null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), d.num, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), d.den, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,4), 'IFERROR(B'+f+'/C'+f+',0)', '0.00%', true, 'FF237C70', fill);
             }});
             const buf = await wb.xlsx.writeBuffer();
             saveAs(new Blob([buf]), 'Cartera_sobre_Activo.xlsx');
@@ -13284,22 +13298,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             _actualizarGauge100('depositos-pasivo-gauge', r.ratio);
         }}
         async function descargarExcelDepositosPasivo() {{
-            const wb = new ExcelJS.Workbook();
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const ws = wb.addWorksheet('Depositos sobre Pasivo');
-            ws.columns = [
-                {{ header: 'Período', key: 'p', width: 20 }},
-                {{ header: 'Depósitos (21)', key: 'n', width: 18 }},
-                {{ header: 'Pasivo (2)', key: 'd', width: 18 }},
-                {{ header: 'Depósitos / Pasivo', key: 'r', width: 20 }}
-            ];
-            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
-            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF045988' }} }};
-            DATOS_DEP_PASIVO.forEach((d, i) => {{
-                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
-                const rn = i + 2;
-                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
-                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
-                row.getCell('r').numFmt = '0.00%';
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:18 }},{{ width:18 }},{{ width:20 }}];
+            ws.mergeCells('A1:D1');
+            Object.assign(ws.getCell('A1'), {{ value:'Depósitos sobre Pasivo · Cta 21 / Pasivo Total (Cta 2)', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FF045988' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:D2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: Depósitos (Cta 21) / Pasivo Total (Cta 2)    |    Mide qué fracción del pasivo corresponde a depósitos de asociados', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FFEFF6FF' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('B4:D4'); _rentApplyGrpHdr(ws.getCell('B4'), 'DEPÓSITOS SOBRE PASIVO — COMPOSICIÓN', 'FF045988');
+            ws.getRow(4).height = 22;
+            ['Período','Depósitos (Cta 21)','Pasivo Total (Cta 2)','Depósitos / Pasivo %']
+                .forEach((h,i) => _rentApplyColHdr(ws.getCell(5, i+1), h));
+            ws.getRow(5).height = 32;
+            DATOS_DEP_PASIVO.forEach((d,i) => {{
+                const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), (MESES_NOMBRE[d.mes]||d.mes)+' '+d.anio, null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), d.num, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), d.den, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,4), 'IFERROR(B'+f+'/C'+f+',0)', '0.00%', true, 'FF045988', fill);
             }});
             const buf = await wb.xlsx.writeBuffer();
             saveAs(new Blob([buf]), 'Depositos_sobre_Pasivo.xlsx');
@@ -13341,7 +13361,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function renderDepCartera() {{
             const datos = _datosDepCartera(DCAR_STATE.cartera), idx = DCAR_STATE.idx, r = datos[idx];
             const COLOR = '#0670A8';
-            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Créditos';
+            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Capital' : 'Cartera Neta';
             const serie = datos.map(d => d.ratio);
             const etq = datos.map(d => `${{(MESES_NOMBRE[d.mes] || d.mes).substring(0,3)}}-${{String(d.anio).substring(2)}}`);
             const etqL = datos.map(d => `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`);
@@ -13374,23 +13394,29 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         async function descargarExcelDepositosCartera() {{
             const datos = _datosDepCartera(DCAR_STATE.cartera);
-            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Total' : 'Cartera de Creditos';
-            const wb = new ExcelJS.Workbook();
+            const nomCart = DCAR_STATE.cartera === 'total' ? 'Cartera Capital' : 'Cartera Neta';
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const ws = wb.addWorksheet('Depositos sobre Cartera');
-            ws.columns = [
-                {{ header: 'Período', key: 'p', width: 20 }},
-                {{ header: 'Depósitos (21)', key: 'n', width: 18 }},
-                {{ header: nomCart, key: 'd', width: 22 }},
-                {{ header: 'Depósitos / Cartera', key: 'r', width: 20 }}
-            ];
-            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
-            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF0670A8' }} }};
-            datos.forEach((d, i) => {{
-                const row = ws.addRow({{ p: `${{MESES_NOMBRE[d.mes] || d.mes}} ${{d.anio}}`, n: d.num, d: d.den }});
-                const rn = i + 2;
-                row.getCell('n').numFmt = '#,##0.00'; row.getCell('d').numFmt = '#,##0.00';
-                row.getCell('r').value = {{ formula: `IF(C${{rn}}=0,"",B${{rn}}/C${{rn}})` }};
-                row.getCell('r').numFmt = '0.00%';
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:18 }},{{ width:20 }},{{ width:20 }}];
+            ws.mergeCells('A1:D1');
+            Object.assign(ws.getCell('A1'), {{ value:'Depósitos sobre Cartera · Cta 21 / '+nomCart, font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FF0670A8' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:D2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: Depósitos (Cta 21) / '+nomCart+'    |    Cobertura de cartera con recursos de depósitos', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:{{ type:'pattern', pattern:'solid', fgColor:{{ argb:'FFEFF6FF' }} }}, alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('B4:D4'); _rentApplyGrpHdr(ws.getCell('B4'), 'DEPÓSITOS SOBRE CARTERA — COMPOSICIÓN', 'FF0670A8');
+            ws.getRow(4).height = 22;
+            ['Período','Depósitos (Cta 21)', nomCart, 'Depósitos / Cartera %']
+                .forEach((h,i) => _rentApplyColHdr(ws.getCell(5, i+1), h));
+            ws.getRow(5).height = 32;
+            datos.forEach((d,i) => {{
+                const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), (MESES_NOMBRE[d.mes]||d.mes)+' '+d.anio, null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), d.num, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), d.den, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,4), 'IFERROR(B'+f+'/C'+f+',0)', '0.00%', true, 'FF0670A8', fill);
             }});
             const buf = await wb.xlsx.writeBuffer();
             saveAs(new Blob([buf]), 'Depositos_sobre_Cartera.xlsx');
@@ -13534,25 +13560,173 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function abrirRendRoa() {{ RENT_ROA.abrir(); }}
         async function descargarExcelRindRoa() {{ await _excelRentInd('roa', 'ROA', 'Rentabilidad_ROA.xlsx'); }}
 
-        // Excel genérico para un indicador de rentabilidad
+        // ── Helpers de estilo compartidos para todos los Excel auditables ──────────
+        function _rentHdrFill(color) {{ return {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: color }} }}; }}
+        function _rentHdrFont(white) {{ return {{ bold: true, size: 10, color: {{ argb: white ? 'FFFFFFFF' : 'FF1A1A1A' }}, name: 'Calibri' }}; }}
+        function _rentDataFont(bold, color) {{ return {{ bold: !!bold, size: 10, name: 'Calibri', color: {{ argb: color || 'FF1A1A1A' }} }}; }}
+        function _rentZebraFill(idx) {{
+            return idx % 2 === 0
+                ? {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFFFFFFF' }} }}
+                : {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFF5F5F5' }} }};
+        }}
+        function _rentBorderThin() {{
+            const s = {{ style: 'thin', color: {{ argb: 'FFD1D5DB' }} }};
+            return {{ top: s, left: s, bottom: s, right: s }};
+        }}
+        function _rentApplyGrpHdr(cell, label, color) {{
+            cell.value = label; cell.font = _rentHdrFont(true); cell.fill = _rentHdrFill(color);
+            cell.alignment = {{ horizontal: 'center', vertical: 'middle' }}; cell.border = _rentBorderThin();
+        }}
+        function _rentApplyColHdr(cell, label) {{
+            cell.value = label; cell.font = _rentHdrFont(false); cell.fill = _rentHdrFill('FFE5E7EB');
+            cell.alignment = {{ horizontal: 'center', vertical: 'middle', wrapText: true }}; cell.border = _rentBorderThin();
+        }}
+        function _rentApplyData(cell, value, fmt, bold, color, fill) {{
+            cell.value = value; if (fmt) cell.numFmt = fmt; cell.font = _rentDataFont(bold, color);
+            cell.fill = fill; cell.border = _rentBorderThin();
+            cell.alignment = {{ horizontal: (typeof value === 'number') ? 'right' : 'left', vertical: 'middle' }};
+        }}
+        function _rentApplyFormula(cell, formula, fmt, bold, color, fill) {{
+            cell.value = {{ formula }}; if (fmt) cell.numFmt = fmt; cell.font = _rentDataFont(bold, color);
+            cell.fill = fill; cell.border = _rentBorderThin();
+            cell.alignment = {{ horizontal: 'right', vertical: 'middle' }};
+        }}
+        function _rentPeriodo(r) {{ return (MESES_NOMBRE[r.mes] || r.mes) + ' ' + r.anio; }}
+
+        // Excel genérico — despachador a función especializada según indicador
         async function _excelRentInd(key, titulo, archivo) {{
-            const wb = new ExcelJS.Workbook();
-            const ws = wb.addWorksheet(titulo.substring(0, 28));
-            ws.columns = [
-                {{ header: 'Período', key: 'p', width: 20 }},
-                {{ header: titulo + ' (%)', key: 'v', width: 18 }}
-            ];
-            ws.getRow(1).font = {{ bold: true, color: {{ argb: 'FFFFFFFF' }} }};
-            ws.getRow(1).fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FF11782C' }} }};
-            DATOS_ICG.forEach((r, i) => {{
-                const c = calcularRentabilidadPeriodo(i);
-                const v = c ? c[key] : null;
-                const row = ws.addRow({{ p: `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}` }});
-                if (v !== null && v !== undefined && !isNaN(v)) {{ row.getCell('v').value = v; row.getCell('v').numFmt = '0.00%'; }}
-                else row.getCell('v').value = '—';
-            }});
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            if (key === 'roe')         {{ _excelRentIndROE(wb); }}
+            else if (key === 'roa')    {{ _excelRentIndROA(wb); }}
+            else if (key === 'margen') {{ _excelRentIndMargen(wb); }}
+            else if (key === 'roic')   {{ _excelRentIndROIC(wb); }}
             const buf = await wb.xlsx.writeBuffer();
             saveAs(new Blob([buf]), archivo);
+        }}
+
+        // ROE — 7 cols: A=Período B=n C=Excedente D=PatrAct E=PatrAnt F=PatrProm G=ROE%
+        function _excelRentIndROE(wb) {{
+            const ws = wb.addWorksheet('ROE');
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:5 }},{{ width:15 }},{{ width:15 }},{{ width:16 }},{{ width:15 }},{{ width:12 }}];
+            ws.mergeCells('A1:G1');
+            Object.assign(ws.getCell('A1'), {{ value:'ROE · Rentabilidad sobre Recursos Propios', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:_rentHdrFill('FFB8923C'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:G2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: ROE = (1 + Exc/(Patr_prom x n))^n - 1    |    Patr_prom = (Patr.actual + Patr.mismo mes año ant.) / 2', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:_rentHdrFill('FFFFF8EC'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            ws.mergeCells('A4:B4'); _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('C4:G4'); _rentApplyGrpHdr(ws.getCell('C4'), 'ROE — COMPOSICIÓN DEL CÁLCULO', 'FFB8923C');
+            ws.getRow(4).height = 22;
+            ['Período','n','Excedente (Cta 53)','Patrimonio actual (Cta 3)','Patrimonio mismo mes año ant.','Patrimonio promedio','ROE %']
+                .forEach((h,i) => {{ _rentApplyColHdr(ws.getCell(5, i+1), h); }});
+            ws.getRow(5).height = 32;
+            DATOS_ICG.forEach((r,i) => {{
+                const calc = calcularRentabilidadPeriodo(i); const inp = calc ? calc.inputs : {{}}; const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), _rentPeriodo(r), null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), inp.n||0, '0', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), inp.excedente||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,4), inp.patrAct||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,5), inp.patrMesAnioAnt||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,6), 'IF(E'+f+'>0,(D'+f+'+E'+f+')/2,D'+f+')', '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,7), 'IFERROR((1+(C'+f+'/(F'+f+'*B'+f+')))^B'+f+'-1,0)', '0.00%', true, 'FF7C5E1F', fill);
+            }});
+        }}
+
+        // ROA — 7 cols: A=Período B=n C=Excedente D=ActAct E=ActAnt F=ActProm G=ROA%
+        function _excelRentIndROA(wb) {{
+            const ws = wb.addWorksheet('ROA');
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:5 }},{{ width:15 }},{{ width:16 }},{{ width:16 }},{{ width:15 }},{{ width:12 }}];
+            ws.mergeCells('A1:G1');
+            Object.assign(ws.getCell('A1'), {{ value:'ROA · Rentabilidad sobre Activos', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:_rentHdrFill('FF11782C'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:G2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: ROA = (1 + Exc/(Activo_prom x n))^n - 1    |    Activo_prom = (Activo actual + Activo mismo mes año ant.) / 2', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:_rentHdrFill('FFECFDF5'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            ws.mergeCells('A4:B4'); _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('C4:G4'); _rentApplyGrpHdr(ws.getCell('C4'), 'ROA — COMPOSICIÓN DEL CÁLCULO', 'FF11782C');
+            ws.getRow(4).height = 22;
+            ['Período','n','Excedente (Cta 53)','Activo total actual (Cta 1)','Activo mismo mes año ant.','Activo promedio','ROA %']
+                .forEach((h,i) => {{ _rentApplyColHdr(ws.getCell(5, i+1), h); }});
+            ws.getRow(5).height = 32;
+            DATOS_ICG.forEach((r,i) => {{
+                const calc = calcularRentabilidadPeriodo(i); const inp = calc ? calc.inputs : {{}}; const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), _rentPeriodo(r), null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), inp.n||0, '0', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), inp.excedente||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,4), inp.actAct||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,5), inp.actMesAnioAnt||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,6), 'IF(E'+f+'>0,(D'+f+'+E'+f+')/2,D'+f+')', '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,7), 'IFERROR((1+(C'+f+'/(F'+f+'*B'+f+')))^B'+f+'-1,0)', '0.00%', true, 'FF11782C', fill);
+            }});
+        }}
+
+        // MARGEN NETO — 7 cols: A=Período B=n C=Excedente D=Cta41 E=Cta4225 F=Denom G=Margen%
+        function _excelRentIndMargen(wb) {{
+            const ws = wb.addWorksheet('Margen Neto');
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:5 }},{{ width:15 }},{{ width:14 }},{{ width:13 }},{{ width:14 }},{{ width:12 }}];
+            ws.mergeCells('A1:G1');
+            Object.assign(ws.getCell('A1'), {{ value:'Margen Neto · Excedente / (Cta 41 + Cta 4225)', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:_rentHdrFill('FF3F7878'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:G2');
+            Object.assign(ws.getCell('A2'), {{ value:'Fórmula: Margen Neto = Excedente (Cta 53) / (Ingresos Cta 41 + Ingresos Cta 4225)    |    Sin anualizar', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:_rentHdrFill('FFECFFFE'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            ws.mergeCells('A4:B4'); _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('C4:G4'); _rentApplyGrpHdr(ws.getCell('C4'), 'MARGEN NETO — COMPOSICIÓN DEL CÁLCULO', 'FF3F7878');
+            ws.getRow(4).height = 22;
+            ['Período','n','Excedente (Cta 53)','Ingresos Cta 41','Ingresos Cta 4225','Denominador (41+4225)','Margen %']
+                .forEach((h,i) => {{ _rentApplyColHdr(ws.getCell(5, i+1), h); }});
+            ws.getRow(5).height = 32;
+            DATOS_ICG.forEach((r,i) => {{
+                const calc = calcularRentabilidadPeriodo(i); const inp = calc ? calc.inputs : {{}}; const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), _rentPeriodo(r), null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), inp.n||0, '0', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), inp.excedente||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,4), inp.ing41||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,5), inp.ing4225||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,6), 'D'+f+'+E'+f, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,7), 'IFERROR(C'+f+'/F'+f+',0)', '0.00%', true, 'FF2A5252', fill);
+            }});
+        }}
+
+        // ROIC — 12 cols: A=Período B=n C=Exc D=Dep21Act E=Dep21Ant F=PromDep G=Obl23Act H=Obl23Ant I=PromObl J=PromPatr K=CapInv L=ROIC%
+        function _excelRentIndROIC(wb) {{
+            const ws = wb.addWorksheet('ROIC');
+            ws.views = [{{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 5 }}];
+            ws.columns = [{{ width:17 }},{{ width:5 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:14 }},{{ width:15 }},{{ width:12 }}];
+            ws.mergeCells('A1:L1');
+            Object.assign(ws.getCell('A1'), {{ value:'ROIC · Rentabilidad sobre Capital Invertido', font:{{ bold:true, size:13, color:{{ argb:'FFFFFFFF' }}, name:'Calibri' }}, fill:_rentHdrFill('FF5A8B6E'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(1).height = 30;
+            ws.mergeCells('A2:L2');
+            Object.assign(ws.getCell('A2'), {{ value:'ROIC = (1+Exc/(CapInv x n))^n-1   |   CapInv = Prom.Depósitos(21) + Prom.Obligaciones(23) + Prom.Patrimonio(3)', font:{{ italic:true, size:9, color:{{ argb:'FF6B7280' }}, name:'Calibri' }}, fill:_rentHdrFill('FFEDFAF3'), alignment:{{ horizontal:'center', vertical:'middle' }} }});
+            ws.getRow(2).height = 22;
+            ws.mergeCells('A4:B4'); _rentApplyGrpHdr(ws.getCell('A4'), 'PERÍODO', 'FF6B7280');
+            ws.mergeCells('C4:C4'); _rentApplyGrpHdr(ws.getCell('C4'), 'EXCEDENTE', 'FF5A8B6E');
+            ws.mergeCells('D4:F4'); _rentApplyGrpHdr(ws.getCell('D4'), 'DEPÓSITOS (Cta 21)', 'FF3D7A5C');
+            ws.mergeCells('G4:I4'); _rentApplyGrpHdr(ws.getCell('G4'), 'OBLIGACIONES (Cta 23)', 'FF2D6047');
+            ws.mergeCells('J4:K4'); _rentApplyGrpHdr(ws.getCell('J4'), 'CAPITAL INVERTIDO', 'FF1E4A34');
+            _rentApplyGrpHdr(ws.getCell('L4'), 'ROIC', 'FF1E4A34');
+            ws.getRow(4).height = 22;
+            ['Período','n','Excedente (Cta 53)','Depósitos actual','Depósitos año ant.','Prom. depósitos','Obligac. actual','Obligac. año ant.','Prom. obligaciones','Prom. patrimonio','Capital invertido','ROIC %']
+                .forEach((h,i) => {{ _rentApplyColHdr(ws.getCell(5, i+1), h); }});
+            ws.getRow(5).height = 32;
+            DATOS_ICG.forEach((r,i) => {{
+                const calc = calcularRentabilidadPeriodo(i); const inp = calc ? calc.inputs : {{}}; const f = i+6; const fill = _rentZebraFill(i);
+                _rentApplyData(ws.getCell(f,1), _rentPeriodo(r), null, true, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,2), inp.n||0, '0', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,3), inp.excedente||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,4), inp.pas21Act||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,5), inp.pas21MesAnt||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,6), 'IF(E'+f+'>0,(D'+f+'+E'+f+')/2,D'+f+')', '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,7), inp.pas23Act||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,8), inp.pas23MesAnt||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,9), 'IF(G'+f+'>0,IF(H'+f+'>0,(G'+f+'+H'+f+')/2,G'+f+'),0)', '#,##0.00', false, 'FF374151', fill);
+                _rentApplyData(ws.getCell(f,10), inp.promPatrimonioRoic||inp.patrProm||0, '#,##0.00', false, 'FF374151', fill);
+                _rentApplyFormula(ws.getCell(f,11), 'F'+f+'+I'+f+'+J'+f, '#,##0.00', true, 'FF1E4A34', fill);
+                _rentApplyFormula(ws.getCell(f,12), 'IFERROR((1+(C'+f+'/(K'+f+'*B'+f+')))^B'+f+'-1,0)', '0.00%', true, 'FF3A6048', fill);
+            }});
         }}
 
 
@@ -14069,7 +14243,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const crecTotalSerie = csegCrecMensual(totalSerie);
             // Etiqueta integrada del gráfico TOTAL
             const tagTotal = document.getElementById('cseg-tag-total');
-            if (tagTotal) tagTotal.outerHTML = _depTagHTML('Cartera Total', CSEG_COLOR_TOTAL, reg.total, crecTotalSerie[idx], false)
+            if (tagTotal) tagTotal.outerHTML = _depTagHTML('Cartera Capital', CSEG_COLOR_TOTAL, reg.total, crecTotalSerie[idx], false)
                 .replace('class="dep-chart-tag"', 'class="cseg-chart-tag" id="cseg-tag-total"');
         }}
 
@@ -18056,13 +18230,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 requestAnimationFrame(() => {{
                     inicializarGraficoMora(IDX_MORA_DEFAULT);
                     renderPeriodoMora(IDX_MORA_DEFAULT);
-                    // Gráfico de composición (Mora vs Cartera Total)
+                    // Gráfico de composición (Mora vs Cartera Capital)
                     ajustarAnchoComposicion('mora-comp-inner', 'mora-comp-scroll');
                     crearGraficoComposicion('chartMoraComp', {{
                         numSerie: SERIE_MORA_NUM,
                         denSerie: SERIE_MORA_DEN,
                         numLabel: 'Mora Total',
-                        denLabel: 'Cartera Total',
+                        denLabel: 'Cartera Capital',
                         colorNum: '#C91A15',
                         colorDen: '#fca5a5',
                         axisContainerId: 'chartMoraCompAxis-container'
@@ -19093,13 +19267,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 requestAnimationFrame(() => {{
                     inicializarGraficoRiesgo(IDX_RIESGO_DEFAULT);
                     renderPeriodoRiesgo(IDX_RIESGO_DEFAULT);
-                    // Gráfico de composición (B+C+D+E vs Cartera Total)
+                    // Gráfico de composición (B+C+D+E vs Cartera Capital)
                     ajustarAnchoComposicion('riesgo-comp-inner', 'riesgo-comp-scroll');
                     crearGraficoComposicion('chartRiesgoComp', {{
                         numSerie: SERIE_RIESGO_NUM,
                         denSerie: SERIE_RIESGO_DEN,
                         numLabel: 'Cartera B+C+D+E',
-                        denLabel: 'Cartera Total',
+                        denLabel: 'Cartera Capital',
                         colorNum: '#045988',
                         colorDen: '#93c5fd',
                         axisContainerId: 'chartRiesgoCompAxis-container'
@@ -19573,7 +19747,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     if (chartCrecimiento) chartCrecimiento.resize();
                 }});
             }}
-            // Evolución de cartera total y por segmentos (estilo Depósitos)
+            // Evolución de cartera capital y por segmentos (estilo Depósitos)
             inicializarEvolucionCartera();
             
             window.scrollTo({{ top: 0, behavior: 'instant' }});
@@ -20682,7 +20856,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const FILAS_MONEY = [
                 {{ seccion: 'Estructura — Activo' }},
                 {{ nombre: 'Activo', modulo: 'Activo', serie: SERIE_EVOLUCION_ACTIVO, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#36BAA8', punto: '#36BAA8', click: 'abrirEvolucionActivo' }},
-                {{ nombre: 'Cartera de Créditos', modulo: 'Activo · Cuenta 14', serie: SERIE_CARTERA_14, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirEvolucionActivo' }},
+                {{ nombre: 'Cartera Neta', modulo: 'Activo · Cuenta 14', serie: SERIE_CARTERA_14, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#045988', punto: '#045988', click: 'abrirEvolucionActivo' }},
                 {{ nombre: 'Efectivo y Equivalente', modulo: 'Activo · Cuenta 11', serie: SERIE_EFECTIVO_11, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#36BAA8', punto: '#36BAA8', click: 'abrirEvolucionActivo' }},
                 {{ nombre: 'Inversiones', modulo: 'Activo · Cuenta 12', serie: SERIE_INVERSIONES_12, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#2CAAEE', punto: '#2CAAEE', click: 'abrirEvolucionActivo' }},
                 {{ nombre: 'Cuentas por Cobrar', modulo: 'Activo · Cuenta 16', serie: SERIE_CXC_16, fmt: fmtMill, unidad: '%', modo: 'neutro', invertir: false, baseHex: '#237C70', punto: '#237C70', click: 'abrirEvolucionActivo' }},
@@ -20978,55 +21152,207 @@ def _extraer_bundle_embebido() -> dict:
 HOJA_BALANCES = "BALANCES"
 ABRIR_HTML_AL_TERMINAR = True
 
+# Nombre del archivo de balances que se detecta automáticamente en la carpeta del script.
+NOMBRE_ARCHIVO_BALANCES = "BALANCES.xlsx"
 
-def seleccionar_archivo_con_dialogo():
-    """Abre una ventana para que el usuario elija el archivo Excel."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError:
-        return None
-    
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    
-    ruta = filedialog.askopenfilename(
-        title="Selecciona el archivo Excel con los Balances",
-        filetypes=[
-            ("Archivos Excel", "*.xlsx *.xlsm *.xls"),
-            ("Todos los archivos", "*.*"),
-        ],
-    )
-    root.destroy()
-    
-    return Path(ruta) if ruta else None
+# ------------------------------------------------------------------------------
+# CONFIGURACIÓN DE PUBLICACIÓN EN GITHUB
+# ------------------------------------------------------------------------------
+# Al terminar de generar el HTML, si PUBLICAR_EN_GITHUB = True, el script hace
+# automáticamente: git add + commit + push a tu repositorio ya configurado.
+#
+# REQUISITOS (una sola vez):
+#   1. Tener Git instalado.
+#   2. Que la carpeta del repo (REPO_DIR) sea un repositorio git ya clonado/inicializado
+#      y vinculado a tu GitHub (con 'git remote' configurado).
+#   3. Tener las credenciales guardadas (token o SSH) para que 'git push' no pida
+#      usuario/contraseña. En Windows esto normalmente ya lo gestiona el
+#      Git Credential Manager tras el primer push.
+#   4. Tener GitHub Pages activado en el repo apuntando a la rama y carpeta de abajo.
+#
+PUBLICAR_EN_GITHUB = True
+
+# Carpeta del repositorio git local donde se publica el dashboard.
+#   - None  -> usa la misma carpeta del script (lo más común si el script vive
+#              dentro del repo).
+#   - "ruta" -> ruta absoluta a tu repo si está en otro lugar,
+#               por ejemplo: r"C:\Users\Diana\Documentos\mi-dashboard"
+REPO_DIR = None
+
+# Nombre del archivo HTML que GitHub Pages servirá como página principal.
+# 'index.html' en la raíz del repo es lo que Pages busca por defecto.
+NOMBRE_HTML_PUBLICADO = "index.html"
+
+# Rama a la que se hace push. Para repos creados recientemente suele ser "main";
+# en repos antiguos puede ser "master". Si no estás seguro, déjalo en None y el
+# script detecta la rama actual automáticamente.
+RAMA_GITHUB = None
+
+# Mensaje de commit. {fecha} se reemplaza por la fecha y hora de la ejecución.
+MENSAJE_COMMIT = "Actualizar dashboard de indicadores financieros - {fecha}"
 
 
 def obtener_ruta_excel():
-    """Determina qué archivo Excel usar (argumento, diálogo, o BALANCES.xlsx local)."""
+    """Detecta automáticamente BALANCES.xlsx en la carpeta del script (sin ventana).
+
+    Orden de búsqueda:
+      1. Si se pasa una ruta como argumento de línea de comandos, se usa esa.
+      2. BALANCES.xlsx en la misma carpeta del script.
+      3. Si no existe, error claro.
+    """
     carpeta_script = Path(__file__).parent
-    
+
+    # 1. Argumento explícito por línea de comandos (opcional, sigue funcionando)
     if len(sys.argv) > 1:
         ruta = Path(sys.argv[1])
         if not ruta.exists():
             raise FileNotFoundError(f"No se encontró el archivo: {ruta}")
+        print(f"   Usando archivo indicado por argumento: {ruta.name}")
         return ruta
-    
-    print("Abriendo dialogo para seleccionar el archivo Excel...")
-    ruta = seleccionar_archivo_con_dialogo()
-    if ruta and ruta.exists():
-        return ruta
-    
-    fallback = carpeta_script / "BALANCES.xlsx"
-    if fallback.exists():
-        print(f"   No se selecciono archivo. Usando el local: {fallback.name}")
-        return fallback
-    
+
+    # 2. Detección automática: BALANCES.xlsx en la carpeta del script
+    candidato = carpeta_script / NOMBRE_ARCHIVO_BALANCES
+    if candidato.exists():
+        print(f"   Detectado automáticamente: {candidato.name}")
+        return candidato
+
+    # 3. No se encontró
     raise FileNotFoundError(
-        "No se selecciono ningun archivo y no existe BALANCES.xlsx en la "
-        "carpeta del script. Cancelando ejecucion."
+        f"No se encontró '{NOMBRE_ARCHIVO_BALANCES}' en la carpeta del script:\n"
+        f"   {carpeta_script}\n"
+        f"Coloca el archivo de balances ahí (o pásalo como argumento) y vuelve a ejecutar."
     )
+
+
+def _run_git(args, cwd):
+    """Ejecuta un comando git y devuelve (exito, salida). No lanza excepción."""
+    try:
+        res = subprocess.run(
+            ["git"] + args,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+        )
+        salida = (res.stdout or "") + (res.stderr or "")
+        return res.returncode == 0, salida.strip()
+    except FileNotFoundError:
+        return False, "git no está instalado o no está en el PATH"
+    except Exception as e:
+        return False, str(e)
+
+
+def publicar_en_github(ruta_html):
+    """Copia el HTML como index.html al repo y hace git add + commit + push.
+
+    Devuelve True si el push fue exitoso, False en caso contrario. No interrumpe
+    el programa si algo falla: solo informa por consola.
+    """
+    import datetime
+
+    # 1. Determinar la carpeta del repositorio
+    if REPO_DIR:
+        repo = Path(REPO_DIR)
+    else:
+        repo = Path(__file__).parent
+    repo = repo.resolve()
+
+    print("\n" + "=" * 70)
+    print("  PUBLICACIÓN EN GITHUB")
+    print("=" * 70)
+    print(f"  Repositorio: {repo}")
+
+    # 2. Verificar que git está disponible
+    ok, _ = _run_git(["--version"], repo)
+    if not ok:
+        print("  ✗ Git no está disponible. Omitiendo publicación.")
+        print("    Instala Git desde https://git-scm.com y vuelve a intentar.")
+        return False
+
+    # 3. Verificar que la carpeta es un repositorio git
+    ok, _ = _run_git(["rev-parse", "--is-inside-work-tree"], repo)
+    if not ok:
+        print(f"  ✗ La carpeta no es un repositorio git: {repo}")
+        print("    Configura el repo (git clone / git init + git remote) o ajusta REPO_DIR.")
+        return False
+
+    # 4. Copiar el HTML generado como index.html en la raíz del repo (si difiere)
+    destino = repo / NOMBRE_HTML_PUBLICADO
+    try:
+        if Path(ruta_html).resolve() != destino.resolve():
+            shutil.copyfile(str(ruta_html), str(destino))
+            print(f"  Copiado HTML -> {destino.name}")
+        else:
+            print(f"  HTML ya está en el repo como {destino.name}")
+    except Exception as e:
+        print(f"  ✗ No se pudo copiar el HTML al repo: {e}")
+        return False
+
+    # 5. Determinar la rama
+    rama = RAMA_GITHUB
+    if not rama:
+        ok, out = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+        rama = out if ok and out else "main"
+    print(f"  Rama: {rama}")
+
+    # 6. git add del index.html (y del Excel si está dentro del repo, opcional)
+    _run_git(["add", NOMBRE_HTML_PUBLICADO], repo)
+
+    # 7. Verificar si hay algo que commitear
+    ok, out = _run_git(["status", "--porcelain"], repo)
+    if ok and not out:
+        print("  Sin cambios respecto a lo ya publicado. No se hace commit.")
+        print("=" * 70)
+        return True
+
+    # 8. Commit
+    fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    mensaje = MENSAJE_COMMIT.format(fecha=fecha)
+    ok, out = _run_git(["commit", "-m", mensaje], repo)
+    if not ok:
+        print(f"  ✗ Error en commit:\n    {out}")
+        return False
+    print(f"  ✓ Commit creado: \"{mensaje}\"")
+
+    # 9. Push
+    print("  Haciendo push a GitHub...")
+    ok, out = _run_git(["push", "origin", rama], repo)
+    if not ok:
+        print(f"  ✗ Error en push:\n    {out}")
+        print("    Revisa que tengas permisos y credenciales configuradas.")
+        return False
+
+    print("  ✓ Push exitoso. El dashboard se actualizará en GitHub Pages en ~1 min.")
+
+    # 10. Intentar mostrar la URL de Pages
+    ok, remoto = _run_git(["remote", "get-url", "origin"], repo)
+    if ok and remoto:
+        url_pages = _deducir_url_pages(remoto)
+        if url_pages:
+            print(f"  URL del dashboard: {url_pages}")
+    print("=" * 70)
+    return True
+
+
+def _deducir_url_pages(remote_url):
+    """Convierte la URL del remoto (https o ssh) en la URL de GitHub Pages."""
+    try:
+        url = remote_url.strip()
+        # Normalizar ssh -> partes
+        if url.startswith("git@github.com:"):
+            resto = url.split("git@github.com:", 1)[1]
+        elif "github.com/" in url:
+            resto = url.split("github.com/", 1)[1]
+        else:
+            return None
+        if resto.endswith(".git"):
+            resto = resto[:-4]
+        partes = resto.split("/")
+        if len(partes) < 2:
+            return None
+        usuario, repo = partes[0], partes[1]
+        return f"https://{usuario}.github.io/{repo}/"
+    except Exception:
+        return None
 
 
 def main():
@@ -21146,9 +21472,9 @@ def main():
             "cta_4":  round(_saldo_cta(anio, mes, "4"), 2),    # Ingresos
             "cta_1":  round(_saldo_cta(anio, mes, "1"), 2),    # Activo total
             "cta_2":  round(_saldo_cta(anio, mes, "2"), 2),    # Pasivo total
-            "cta_14": round(_saldo_cta(anio, mes, "14"), 2),   # Cartera de Créditos
+            "cta_14": round(_saldo_cta(anio, mes, "14"), 2),   # Cartera Neta
             "cta_21": round(_saldo_cta(anio, mes, "21"), 2),   # Depósitos
-            "cartera_total": round(cartera_bruta_tot, 2),       # Cartera Total (suma cuentas brutas 14xx)
+            "cartera_total": round(cartera_bruta_tot, 2),       # Cartera Capital (suma cuentas brutas 14xx)
         })
     
     # === Segmentos de cartera por período (para evolución estilo Depósitos) ===
@@ -21196,7 +21522,7 @@ def main():
     print(f"  Solvencia:                  {r['solvencia']*100:>13.2f}%   {estado}")
     print(f"  Holgura:                    {r['holgura_solvencia']*100:>+13.2f} pp")
     print(f"  Fondo de Liquidez:          {r['ratio_liquidez']*100:>13.2f}%   (req: 10%)")
-    print(f"  Cartera Total:              {rm['total_general']:>14,.2f} M COP")
+    print(f"  Cartera Capital:              {rm['total_general']:>14,.2f} M COP")
     print(f"  Mora Total (B+C+D+E):       {rm['mora_total']:>14,.2f} M COP")
     print(f"  Indice de Mora:             {rm['indice_mora']*100:>13.2f}%")
     print(f"  Calidad de Cartera (Riesgo):{rr['calidad_cartera']*100:>13.2f}%")
@@ -21226,6 +21552,14 @@ def main():
     if ABRIR_HTML_AL_TERMINAR:
         print(f"\nAbriendo el dashboard en el navegador...")
         webbrowser.open(ruta_html.as_uri())
+    
+    # Publicar automáticamente en GitHub (si está habilitado)
+    if PUBLICAR_EN_GITHUB:
+        try:
+            publicar_en_github(ruta_html)
+        except Exception as e:
+            print(f"\n  ✗ La publicación en GitHub falló: {e}")
+            print("    El HTML se generó correctamente; puedes publicarlo manualmente.")
     
     print("\nLISTO!\n")
     return ruta_html
