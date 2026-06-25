@@ -111,10 +111,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                (el logo es pequeño arriba-izquierda y el header se reordena). */
             .header { padding-left: 0; padding-top: 56px; }
             #logo-febor-fijo {
+                position: fixed !important;
                 top: 12px;
                 bottom: auto;
                 left: 12px;
                 width: 88px;
+                z-index: 10002;
             }
             /* El menú deja de centrar vertical y arranca bajo el logo */
             .menu-principal {
@@ -193,6 +195,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                 z-index: 10001;
                 padding: 14px 20px 14px 16px;
                 font-size: 15px;
+                background: #ffffff !important;
                 box-shadow: 0 6px 20px rgba(0,0,0,0.18);
             }
             /* Mostrar solo "Volver" para que quepa junto al de Inicio */
@@ -458,10 +461,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             grid-template-rows: repeat(4, 1fr);
         }
         .kpi-card {
-            background: var(--neu-bg);
+            background: #ffffff;
             border-radius: 20px;
             padding: 20px 22px;
-            box-shadow: var(--neu-out);
+            box-shadow: var(--neu-white-out);
             border: none;
             transition: transform 0.25s, box-shadow 0.25s;
             position: relative;
@@ -480,7 +483,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .kpi-card.kpi-liq::before { background: var(--accent); }
         .kpi-card:hover {
             transform: translateY(-3px);
-            box-shadow: var(--neu-out-lg);
+            box-shadow: 9px 9px 20px var(--neu-white-dark), -9px -9px 20px #ffffff;
         }
         .kpi-label {
             font-size: 10.5px; font-weight: 600;
@@ -1565,16 +1568,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             display: inline-block;
             border-radius: 2px;
         }
-        /* Muestras de leyenda — armonizadas con ICG_COLORS de la paleta */
-        .icg-sq-ingresos { background: #77DE93; border: 1px solid #26D354; }
-        .icg-sq-costos   { background: #5FBF7E; border: 1px solid #17A53D; }
-        .icg-sq-gastos   { background: #3E9A5C; border: 1px solid #11782C; }
-        .icg-sq-excedente-pos { background: #0C5E22; border: 1px solid #11782C; }
+        /* Muestras de leyenda — colores diferenciales por naturaleza */
+        .icg-sq-ingresos { background: #5BD27C; border: 1px solid #17A53D; }
+        .icg-sq-costos   { background: #F5B14C; border: 1px solid #E08A00; }
+        .icg-sq-gastos   { background: #EE7A75; border: 1px solid #D6403A; }
+        .icg-sq-excedente-pos { background: #1D5E8C; border: 1px solid #16486B; }
         .icg-sq-excedente-neg { background: #C91A15; border: 1px solid #A0100B; }
         /* Excedente: la "línea" se acompaña de un punto blanco con borde negro,
            igual que los marcadores del gráfico */
         .icg-line-excedente {
-            background: #0C5E22;
+            background: #1D5E8C;
             height: 2px; width: 24px;
             position: relative;
         }
@@ -1585,7 +1588,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             transform: translate(-50%, -50%);
             width: 7px; height: 7px;
             background: #ffffff;
-            border: 1.5px solid #4D61B4;
+            border: 1.5px solid #1D5E8C;
             border-radius: 50%;
         }
 
@@ -1639,7 +1642,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         }
         .distrib-layout {
             display: grid;
-            grid-template-columns: 320px 1fr;
+            grid-template-columns: 440px 1fr;
             gap: 32px;
             align-items: center;
             margin-top: 12px;
@@ -1650,37 +1653,39 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .distrib-chart-wrap {
             position: relative;
             width: 100%;
-            max-width: 320px;
-            aspect-ratio: 1 / 1;
             margin: 0 auto;
         }
-        .distrib-chart-center {
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
+        .distrib-ingresos-head {
             text-align: center;
-            pointer-events: none;
-            width: 70%;
+            margin-bottom: 14px;
         }
-        .distrib-chart-center-label {
+        .distrib-ingresos-label {
+            display: block;
             font-size: 11px;
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
             color: #6b7280;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
-        .distrib-chart-center-valor {
-            font-size: 22px;
+        .distrib-ingresos-valor {
+            display: block;
+            font-size: 24px;
             font-weight: 700;
             color: #1c2520;
             line-height: 1.1;
         }
-        .distrib-chart-center-sub {
+        .distrib-ingresos-sub {
+            display: block;
             font-size: 11px;
             font-weight: 500;
             color: #9ca3af;
-            margin-top: 4px;
+            margin-top: 2px;
+        }
+        .distrib-bars-box {
+            position: relative;
+            height: 200px;
+            width: 100%;
         }
         .distrib-tabla {
             width: 100%;
@@ -1909,15 +1914,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .depositos-tabla thead th {
             position: sticky;
             top: 0;
-            background: #E2F0FA;
-            color: #045988;
+            background: #eef4f1;
+            color: #1f5e52;
             font-weight: 700;
             font-size: 11.5px;
             text-transform: uppercase;
             letter-spacing: 0.4px;
             padding: 13px 16px;
             text-align: right;
-            border-bottom: 2px solid #F4CC9E;
+            border-bottom: 2px solid #cdab6e;
             z-index: 2;
         }
         .depositos-tabla thead th:first-child {
@@ -1956,10 +1961,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             color: #64748b;
         }
         .depositos-tabla tbody tr.dep-total-row td {
-            background: #E2F0FA;
+            background: #eef4f1;
             font-weight: 800;
-            color: #045988;
-            border-top: 2px solid #C1E1F2;
+            color: #1f5e52;
+            border-top: 2px solid #c9dad3;
             font-size: 13.5px;
         }
         .dep-prod-nombre {
@@ -2119,13 +2124,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             margin-top: 12px;
         }
         .evo-subcuenta-card {
-            background: var(--neu-bg);
+            background: #ffffff;
             border: none;
             border-radius: 16px;
             padding: 18px 18px;
             position: relative;
             overflow: hidden;
-            box-shadow: var(--neu-out-sm);
+            box-shadow: var(--neu-white-out);
             transition: transform 0.2s, box-shadow 0.2s;
         }
         .evo-subcuenta-card:hover {
@@ -4281,8 +4286,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .dep-mini-card.cseg-chart-box { padding-top: 0; }
         .dep-mini-card.cseg-chart-box .cseg-chart-tag { top: 2px; right: 8px; }
         .historico-eje-fijo {
-            flex: 0 0 80px;
-            width: 80px;
+            flex: 0 0 96px;
+            width: 96px;
             position: relative;
             z-index: 2;
             padding: 14px 4px 30px 4px;
@@ -4290,8 +4295,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             height: 300px;
         }
         .historico-eje-fijo-small {
-            flex: 0 0 74px;
-            width: 74px;
+            flex: 0 0 88px;
+            width: 88px;
             height: 280px;
             padding: 14px 4px 30px 4px;
         }
@@ -4315,10 +4320,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         /* Eje Y como HTML (más robusto que canvas) */
         .eje-y-titulo {
             position: absolute;
-            left: -2px;
+            left: -4px;
             top: 0;
             bottom: 0;
-            width: 22px;
+            width: 20px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -4339,7 +4344,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             top: 14px;
             bottom: 32px;
             right: 0;
-            left: 22px;
+            left: 24px;
             border-right: 1px solid #cbd5e1;
         }
         .eje-y-tick {
@@ -5381,17 +5386,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
         </div>
 
-        <!-- Gráfico mensual: valores aislados del mes -->
+        <!-- Gráfico mensual: valores aislados del mes (barras divergentes) -->
         <div class="section acc-graficos seccion-icg-neon">
-            <h2 class="section-title">Evolución Mensual: Valores del Mes (no acumulados)</h2>
-            <p class="seccion-subtitulo">Valor mensual = YTD del mes − YTD del mes anterior (Enero usa el valor directo) · Refleja el desempeño aislado de cada mes</p>
+            <h2 class="section-title">Evolución Mensual: Ingresos vs Costos y Gastos</h2>
+            <p class="seccion-subtitulo">Valor mensual = YTD del mes − YTD del mes anterior (Enero usa el valor directo) · Ingresos hacia arriba, Costos y Gastos hacia abajo</p>
 
             <!-- Leyenda -->
             <div class="icg-leyenda">
                 <span class="icg-leyenda-item"><span class="icg-leyenda-sq icg-sq-ingresos"></span> Ingresos</span>
                 <span class="icg-leyenda-item"><span class="icg-leyenda-sq icg-sq-costos"></span> Costos</span>
                 <span class="icg-leyenda-item"><span class="icg-leyenda-sq icg-sq-gastos"></span> Gastos</span>
-                <span class="icg-leyenda-item"><span class="icg-leyenda-line icg-line-excedente"></span> Excedente</span>
             </div>
 
             <div class="historico-flex-wrap">
@@ -5401,6 +5405,24 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                 <div class="chart-scroll-container chart-scroll-icg" id="icg-mensual-scroll-container">
                     <div class="chart-inner chart-inner-icg" id="icg-mensual-inner">
                         <canvas id="chartICGMensual"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-hint">Desplázate por los períodos con la barra inferior</div>
+        </div>
+
+        <!-- Gráfico separado: Excedente mensual -->
+        <div class="section acc-graficos seccion-icg-neon">
+            <h2 class="section-title">Excedente Mensual</h2>
+            <p class="seccion-subtitulo">Resultado de cada mes (Ingresos − Costos − Gastos) · Verde si es positivo, rojo si es negativo</p>
+
+            <div class="historico-flex-wrap">
+                <div class="historico-eje-fijo">
+                    <div id="chartICGExcedente-axis-container" class="eje-y-html-container"></div>
+                </div>
+                <div class="chart-scroll-container chart-scroll-icg" id="icg-excedente-scroll-container">
+                    <div class="chart-inner chart-inner-icg" id="icg-excedente-inner">
+                        <canvas id="chartICGExcedente"></canvas>
                     </div>
                 </div>
             </div>
@@ -5432,14 +5454,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             <h2 class="section-title">Distribución del Ingreso · BALANCE</h2>
 
             <div class="distrib-layout">
-                <!-- Gráfico donut a la izquierda -->
+                <!-- Barras horizontales a la izquierda -->
                 <div class="distrib-chart-wrap">
-                    <div class="distrib-chart-center" id="distrib-chart-center">
-                        <div class="distrib-chart-center-label">Ingresos del período</div>
-                        <div class="distrib-chart-center-valor" id="distrib-ingresos-total">—</div>
-                        <div class="distrib-chart-center-sub">100% · M COP</div>
+                    <div class="distrib-ingresos-head">
+                        <span class="distrib-ingresos-label">Ingresos del período</span>
+                        <span class="distrib-ingresos-valor" id="distrib-ingresos-total">—</span>
+                        <span class="distrib-ingresos-sub">100% · M COP</span>
                     </div>
-                    <canvas id="chartICGDistrib"></canvas>
+                    <div class="distrib-bars-box">
+                        <canvas id="chartICGDistrib"></canvas>
+                    </div>
                 </div>
 
                 <!-- Tabla a la derecha -->
@@ -5793,6 +5817,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             <div class="categoria-mora-grid" id="mora-categoria-grid"></div>
         </div>
 
+        <!-- Tabla de detalle por modalidad (mes anterior vs actual) -->
+        <div class="section">
+            <h2 class="section-title">Detalle de Mora por Modalidad</h2>
+            <p class="seccion-subtitulo" id="mora-tabla-sub">Cartera vencida y su índice por modalidad</p>
+            <div class="depositos-tabla-wrap">
+                <table class="depositos-tabla" id="mora-tabla"></table>
+            </div>
+        </div>
+
     </div>
 
     <!-- ========== DASHBOARD DE ÍNDICE DE RIESGO ========== -->
@@ -5955,6 +5988,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <div class="section">
             <h2 class="section-title">Detalle de Cartera Bruta (Cuentas 4 dígitos)</h2>
             <div id="riesgo-bruta-detalle"></div>
+        </div>
+
+        <!-- Tabla de detalle por modalidad (mes anterior vs actual) -->
+        <div class="section">
+            <h2 class="section-title">Detalle de Riesgo por Modalidad</h2>
+            <p class="seccion-subtitulo" id="riesgo-tabla-sub">Cartera en riesgo (B,C,D,E) y su calidad por modalidad</p>
+            <div class="depositos-tabla-wrap">
+                <table class="depositos-tabla" id="riesgo-tabla"></table>
+            </div>
         </div>
 
     </div>
@@ -6262,6 +6304,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             <h2 class="section-title">Indicadores de Crecimiento por Modalidad</h2>
             <p class="seccion-subtitulo">Variación anual interanual: período actual vs mismo mes del año anterior</p>
             <div class="modalidad-grid" id="crecimiento-modalidad-grid"></div>
+        </div>
+
+        <!-- Tabla de detalle por segmento -->
+        <div class="section">
+            <h2 class="section-title">Detalle por Segmento de Cartera</h2>
+            <p class="seccion-subtitulo" id="crecimiento-tabla-sub">Saldo actual vs año anterior · Crecimiento interanual</p>
+            <div class="depositos-tabla-wrap">
+                <table class="depositos-tabla" id="crecimiento-tabla"></table>
+            </div>
         </div>
 
     </div>
@@ -12244,6 +12295,29 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         return `<span class="dep-crec ${cls}">${fl} ${(sube?'+':'')}${v.toFixed(2).replace('.',',')}%</span>`;
     }
 
+    // Variación en pesos (millones COP) con color y flecha, igual estilo que el %.
+    function badgeVarPesos(v) {
+        if (v === null || v === undefined) return '<span class="dep-crec igual">—</span>';
+        if (Math.abs(v) < 0.005) return '<span class="dep-crec igual">▬ 0,00</span>';
+        const sube = v > 0;
+        const cls = sube ? 'sube' : 'baja';
+        const fl = sube ? '▲' : '▼';
+        return `<span class="dep-crec ${cls}">${fl} ${(sube?'+':'')}${fmtDepMill(v)}</span>`;
+    }
+
+    // Variación de un índice (mora/riesgo) en puntos básicos.
+    // Para índices de riesgo: SUBIR es malo (rojo), BAJAR es bueno (verde).
+    function badgePbs(pbs) {
+        if (pbs === null || pbs === undefined) return '<span class="dep-crec igual">—</span>';
+        if (Math.abs(pbs) < 0.5) return '<span class="dep-crec igual">▬ 0 Pbs</span>';
+        const sube = pbs > 0;
+        // Invertido: un aumento del índice de mora/riesgo es desfavorable
+        const cls = sube ? 'baja' : 'sube';
+        const fl = sube ? '▲' : '▼';
+        const valor = Math.round(pbs);
+        return `<span class="dep-crec ${cls}">${fl} ${(sube?'+':'')}${valor} Pbs</span>`;
+    }
+
     // Construye el HTML de una etiqueta integrada (nombre, valor, variación)
     function _depTagHTML(nombre, color, valor, crec, mini) {
         let cls = 'igual', fl = '▬', txt = '0,00%';
@@ -12276,14 +12350,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                 .replace('class="dep-chart-tag"', 'class="dep-chart-tag" id="dep-tag-total"');
 
         document.getElementById('depositos-prod-sub').textContent =
-            `${MESES_NOMBRE[r.mes] || r.mes} ${r.anio} - ${modo === 'capital' ? 'Saldo capital' : 'Saldo total'} - Crecimiento mensual`;
+            `${MESES_NOMBRE[r.mes] || r.mes} ${r.anio} - ${modo === 'capital' ? 'Saldo capital' : 'Saldo total'} - Variación mensual`;
 
         const items = depProductosVisibles(modo);
         const labelSaldo = modo === 'capital' ? 'Saldo Capital' : 'Saldo Total';
+        // Nombre del mes anterior para el encabezado
+        const rAnt = (idx > 0) ? DATOS_DEPOSITOS[idx - 1] : null;
+        const mesAntLabel = rAnt ? `${(MESES_NOMBRE[rAnt.mes] || rAnt.mes).slice(0,3)} ${rAnt.anio}` : 'Mes anterior';
+        const mesActLabel = `${(MESES_NOMBRE[r.mes] || r.mes).slice(0,3)} ${r.anio}`;
         let thtml = `<thead><tr>
             <th>Producto</th>
-            <th>${labelSaldo} (M COP)</th>
-            <th>Crecimiento mensual</th>
+            <th>${mesAntLabel} (M COP)</th>
+            <th>${labelSaldo} ${mesActLabel} (M COP)</th>
+            <th>Variación (M COP)</th>
+            <th>Variación %</th>
             <th>Participacion</th>
         </tr></thead><tbody>`;
 
@@ -12291,18 +12371,26 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             const serie = depSerieItem(item, modo);
             const crecSerie = depCrecimientoMensual(serie);
             const val = depSaldoItem(r, item, modo);
+            const valAnt = (idx > 0) ? serie[idx - 1] : null;
+            const difAbs = (valAnt !== null && valAnt !== undefined) ? (val - valAnt) : null;
             const part = totalVal > 0 ? (val / totalVal * 100) : 0;
             const color = DEP_COLORS[item.id] || '#64748b';
             thtml += `<tr class="dep-producto-row">
                 <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${color}"></span>${item.nombre}</span></td>
+                <td class="dep-col-ant">${valAnt !== null && valAnt !== undefined ? fmtDepMill(valAnt) : '—'}</td>
                 <td>${fmtDepMill(val)}</td>
+                <td>${badgeVarPesos(difAbs)}</td>
                 <td>${badgeCrecDep(crecSerie[idx])}</td>
                 <td>${part.toFixed(2).replace('.',',')}%</td>
             </tr>`;
         });
+        const totalAnt = (idx > 0) ? totalSerie[idx - 1] : null;
+        const difTotalAbs = (totalAnt !== null && totalAnt !== undefined) ? (totalVal - totalAnt) : null;
         thtml += `<tr class="dep-total-row">
             <td>TOTAL DEPOSITOS</td>
+            <td class="dep-col-ant">${totalAnt !== null && totalAnt !== undefined ? fmtDepMill(totalAnt) : '—'}</td>
             <td>${fmtDepMill(totalVal)}</td>
+            <td>${badgeVarPesos(difTotalAbs)}</td>
             <td>${badgeCrecDep(crecTotal)}</td>
             <td>100,0%</td>
         </tr>`;
@@ -13705,29 +13793,31 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         inicializado: false,
         chart: null,
         chartMensual: null,
+        chartExcedente: null,
         chartDistrib: null,
         chartDistribEvo: null,
         idxActual: 0
     };
 
     const ICG_COLORS = {
-        // Armonizado con la paleta monocromática (tonos suaves)
+        // Colores diferenciales por naturaleza de la cuenta para fácil lectura:
+        // verde = ingresos (entra), naranja = costos, rojo = gastos, azul = excedente.
         ingresos: {
-            bar: '#77DE93', border: '#26D354', soft: 'rgba(38,211,84,0.18)'
+            bar: '#5BD27C', border: '#17A53D', soft: 'rgba(23,165,61,0.18)'
         },
         costos: {
-            bar: '#5FBF7E', border: '#17A53D', soft: 'rgba(23,165,61,0.18)'
+            bar: '#F5B14C', border: '#E08A00', soft: 'rgba(224,138,0,0.18)'
         },
         gastos: {
-            bar: '#3E9A5C', border: '#11782C', soft: 'rgba(17,120,44,0.18)'
+            bar: '#EE7A75', border: '#D6403A', soft: 'rgba(214,64,58,0.18)'
         },
-        // Excedente: linea verde oscuro de la gama
+        // Excedente: línea azul oscuro para contrastar con las barras
         excedente: {
-            line: '#0C5E22',
-            pointFill: '#ffffff', pointBorder: '#0C5E22',
-            pointFillActivo: '#0C5E22', pointBorderActivo: '#ffffff',
-            soft: 'rgba(12,94,34,0.08)',
-            slice: '#0C5E22'
+            line: '#1D5E8C',
+            pointFill: '#ffffff', pointBorder: '#1D5E8C',
+            pointFillActivo: '#1D5E8C', pointBorderActivo: '#ffffff',
+            soft: 'rgba(29,94,140,0.08)',
+            slice: '#1D5E8C'
         },
     };
 
@@ -14031,15 +14121,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             crearGraficoICGAnual();
         }
 
-        // 2. Gráfico mensual: solo cambiar resaltado del punto actual
+        // 2. Gráfico mensual divergente: actualizar resaltado del período actual.
+        //    Ya no tiene línea de excedente (es un gráfico separado), así que
+        //    solo refrescamos ambos gráficos y sincronizamos el scroll.
         if (ICG_STATE.chartMensual) {
-            const serie = construirSerieMensualICG();
-            const dsExc = ICG_STATE.chartMensual.data.datasets[3];
-            dsExc.pointBackgroundColor = serie.excedente.map((v, i) => i === idx ? ICG_COLORS.excedente.pointFillActivo : ICG_COLORS.excedente.pointFill);
-            dsExc.pointBorderColor    = serie.excedente.map((v, i) => i === idx ? ICG_COLORS.excedente.pointBorderActivo : ICG_COLORS.excedente.pointBorder);
-            dsExc.pointBorderWidth    = serie.excedente.map((_, i) => i === idx ? 2.5 : 1.8);
-            dsExc.pointRadius = serie.excedente.map((_, i) => i === idx ? 8 : 4);
             ICG_STATE.chartMensual.update('active');
+            if (ICG_STATE.chartExcedente) ICG_STATE.chartExcedente.update('active');
             scrollAlPeriodoICGMensual(idx);
         }
 
@@ -14231,40 +14318,28 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         data: serie.ingresos,
                         backgroundColor: ICG_COLORS.ingresos.bar,
                         borderColor: ICG_COLORS.ingresos.border,
-                        borderWidth: 1, borderRadius: 4, order: 2
+                        borderWidth: 1, borderRadius: 4, stack: 'positivo'
                     },
                     {
                         label: 'Costos', type: 'bar',
-                        data: serie.costos,
+                        data: serie.costos.map(v => (v === null || v === undefined) ? v : -v),
                         backgroundColor: ICG_COLORS.costos.bar,
                         borderColor: ICG_COLORS.costos.border,
-                        borderWidth: 1, borderRadius: 4, order: 2
+                        borderWidth: 1, borderRadius: 4, stack: 'negativo'
                     },
                     {
                         label: 'Gastos', type: 'bar',
-                        data: serie.gastos,
+                        data: serie.gastos.map(v => (v === null || v === undefined) ? v : -v),
                         backgroundColor: ICG_COLORS.gastos.bar,
                         borderColor: ICG_COLORS.gastos.border,
-                        borderWidth: 1, borderRadius: 4, order: 2
-                    },
-                    {
-                        label: 'Excedente', type: 'line',
-                        data: serie.excedente,
-                        borderColor: ICG_COLORS.excedente.line,
-                        backgroundColor: ICG_COLORS.excedente.soft,
-                        borderWidth: 2.5, tension: 0.25, fill: false,
-                        pointBackgroundColor: serie.excedente.map((v, i) => i === ICG_STATE.idxActual ? ICG_COLORS.excedente.pointFillActivo : ICG_COLORS.excedente.pointFill),
-                        pointBorderColor: serie.excedente.map((v, i) => i === ICG_STATE.idxActual ? ICG_COLORS.excedente.pointBorderActivo : ICG_COLORS.excedente.pointBorder),
-                        pointBorderWidth: serie.excedente.map((_, i) => i === ICG_STATE.idxActual ? 2.5 : 1.8),
-                        pointRadius: serie.excedente.map((_, i) => i === ICG_STATE.idxActual ? 8 : 4),
-                        pointHoverRadius: 10, order: 0
+                        borderWidth: 1, borderRadius: 4, stack: 'negativo'
                     }
                 ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
-                layout: { padding: { top: 32, bottom: 8, left: 8, right: 24 } },
+                layout: { padding: { top: 16, bottom: 8, left: 8, right: 24 } },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -14275,22 +14350,102 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         bodyFont: { size: 12.5, weight: '600' },
                         callbacks: {
                             title: (items) => items?.[0] ? serie.etiquetasLargas[items[0].dataIndex] : '',
-                            label: (ctx) => `  ${ctx.dataset.label}: ${fmtMillICGFull(ctx.parsed.y)} M COP`
+                            label: (ctx) => `  ${ctx.dataset.label}: ${fmtMillICGFull(Math.abs(ctx.parsed.y))} M COP`
+                        }
+                    },
+                    datalabels: { display: false }
+                },
+                scales: {
+                    y: {
+                        display: false, grace: '8%',
+                        stacked: true,
+                        grid: { color: '#eef0eb' }
+                    },
+                    x: {
+                        offset: true, stacked: true, grid: { display: false },
+                        ticks: { maxRotation: 0, font: { size: 10, weight: '500' }, color: '#475569' }
+                    }
+                },
+                onClick: (evt, elements) => {
+                    if (elements.length > 0) renderPeriodoICG(elements[0].index);
+                }
+            }
+        });
+
+        // Eje Y HTML ajustado al rango divergente: ingresos (+) y costos+gastos sumados (−).
+        // Se excluye el primer período de la serie (mayo 2021): al no tener meses
+        // previos, su "valor mensual" es en realidad el acumulado YTD parcial y
+        // distorsiona la escala. No es un mes comparable con los demás.
+        const ingParaEje = serie.ingresos.slice(1);
+        const cosParaEje = serie.costos.slice(1);
+        const gasParaEje = serie.gastos.slice(1);
+        const costosGastosNeg = cosParaEje.map((c, i) => -((c || 0) + (gasParaEje[i] || 0)));
+        const todasICGM = [...ingParaEje, ...costosGastosNeg]
+            .filter(v => v !== null && v !== undefined && !isNaN(v));
+        aplicarEjeAlChart(ICG_STATE.chartMensual, sincronizarEjeYHistorico(todasICGM, 'chartICGMensual-axis-container', {
+            tituloEje: 'Millones COP',
+            formatter: (v) => fmtMillICGEs(Math.abs(v))
+        }));
+
+        // Crear/actualizar el gráfico separado de Excedente
+        crearGraficoICGExcedente(serie);
+    }
+
+    // =========== GRÁFICO SEPARADO: SOLO EXCEDENTE MENSUAL ===========
+    function crearGraficoICGExcedente(serie) {
+        const ctx = document.getElementById('chartICGExcedente');
+        if (!ctx) return;
+        ajustarAnchoCanvasICGMensual();
+
+        if (ICG_STATE.chartExcedente) {
+            ICG_STATE.chartExcedente.destroy();
+        }
+
+        ICG_STATE.chartExcedente = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: serie.etiquetas,
+                datasets: [
+                    {
+                        label: 'Excedente del mes', type: 'bar',
+                        data: serie.excedente,
+                        backgroundColor: serie.excedente.map(v => (v >= 0) ? 'rgba(23,165,61,0.85)' : 'rgba(214,64,58,0.85)'),
+                        borderColor: serie.excedente.map(v => (v >= 0) ? '#11782C' : '#A0100B'),
+                        borderWidth: 1, borderRadius: 5
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                layout: { padding: { top: 30, bottom: 8, left: 8, right: 24 } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1c2520',
+                        padding: 12, cornerRadius: 8,
+                        titleColor: '#ffffff', bodyColor: '#ffffff',
+                        titleFont: { weight: '700', size: 13 },
+                        bodyFont: { size: 12.5, weight: '600' },
+                        callbacks: {
+                            title: (items) => items?.[0] ? serie.etiquetasLargas[items[0].dataIndex] : '',
+                            label: (ctx) => `  Excedente: ${fmtMillICGFull(ctx.parsed.y)} M COP`
                         }
                     },
                     datalabels: {
-                        display: (ctx) => ctx.datasetIndex === 3 && ctx.dataIndex === ICG_STATE.idxActual,
-                        align: 'top', anchor: 'end', offset: 10,
-                        clamp: true, clip: false,
-                        backgroundColor: ICG_COLORS.excedente.line, borderRadius: 6,
-                        color: '#ffffff', font: { size: 11, weight: '700' },
+                        display: (ctx) => ctx.dataIndex === ICG_STATE.idxActual,
+                        align: (ctx) => (ctx.dataset.data[ctx.dataIndex] >= 0) ? 'top' : 'bottom',
+                        anchor: (ctx) => (ctx.dataset.data[ctx.dataIndex] >= 0) ? 'end' : 'start',
+                        offset: 6, clamp: true, clip: false,
+                        backgroundColor: (ctx) => (ctx.dataset.data[ctx.dataIndex] >= 0) ? '#11782C' : '#A0100B',
+                        borderRadius: 6, color: '#ffffff', font: { size: 11, weight: '700' },
                         padding: { top: 5, bottom: 5, left: 9, right: 9 },
                         formatter: (v) => v !== null ? fmtMillICGFull(v) : ''
                     }
                 },
                 scales: {
                     y: {
-                        beginAtZero: true, display: false, grace: '10%',
+                        display: false, grace: '15%',
                         grid: { color: '#eef0eb' }
                     },
                     x: {
@@ -14304,35 +14459,38 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             }
         });
 
-        // Eje Y HTML ajustado al rango real de TODAS las series mensuales
-        const todasICGM = [...serie.ingresos, ...serie.costos, ...serie.gastos, ...serie.excedente]
-            .filter(v => v !== null && v !== undefined && !isNaN(v));
-        aplicarEjeAlChart(ICG_STATE.chartMensual, sincronizarEjeYHistorico(todasICGM, 'chartICGMensual-axis-container', {
+        // Eje Y HTML del excedente (se excluye el primer período, acumulado parcial)
+        const excVals = serie.excedente.slice(1).filter(v => v !== null && v !== undefined && !isNaN(v));
+        aplicarEjeAlChart(ICG_STATE.chartExcedente, sincronizarEjeYHistorico(excVals, 'chartICGExcedente-axis-container', {
             tituloEje: 'Millones COP',
             formatter: fmtMillICGEs
         }));
     }
 
     function ajustarAnchoCanvasICGMensual() {
-        const inner = document.getElementById('icg-mensual-inner');
-        const scroll = document.getElementById('icg-mensual-scroll-container');
-        if (!inner || !scroll) return;
-        let anchoVisible = scroll.clientWidth;
-        if (anchoVisible < 100) anchoVisible = 900;
         const VENTANA = 8;
         const ANCHO_MIN = 80;
-        const anchoPorMes = Math.max(ANCHO_MIN, anchoVisible / VENTANA);
-        const anchoTotal = Math.max(anchoVisible, DATOS_ICG.length * anchoPorMes);
-        inner.style.width = anchoTotal + 'px';
+        ['icg-mensual', 'icg-excedente'].forEach(prefijo => {
+            const inner = document.getElementById(prefijo + '-inner');
+            const scroll = document.getElementById(prefijo + '-scroll-container');
+            if (!inner || !scroll) return;
+            let anchoVisible = scroll.clientWidth;
+            if (anchoVisible < 100) anchoVisible = 900;
+            const anchoPorMes = Math.max(ANCHO_MIN, anchoVisible / VENTANA);
+            const anchoTotal = Math.max(anchoVisible, DATOS_ICG.length * anchoPorMes);
+            inner.style.width = anchoTotal + 'px';
+        });
     }
 
     function scrollAlPeriodoICGMensual(idx) {
-        const scroll = document.getElementById('icg-mensual-scroll-container');
-        const inner = document.getElementById('icg-mensual-inner');
-        if (!scroll || !inner) return;
         const ratio = idx / Math.max(1, DATOS_ICG.length - 1);
-        const left = ratio * inner.scrollWidth - scroll.clientWidth / 2;
-        scroll.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+        ['icg-mensual', 'icg-excedente'].forEach(prefijo => {
+            const scroll = document.getElementById(prefijo + '-scroll-container');
+            const inner = document.getElementById(prefijo + '-inner');
+            if (!scroll || !inner) return;
+            const left = ratio * inner.scrollWidth - scroll.clientWidth / 2;
+            scroll.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+        });
     }
 
     // =========== EVOLUCIÓN DE LA DISTRIBUCIÓN POR PERÍODO ===========
@@ -14594,45 +14752,45 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         // -------- Centro del donut: total de ingresos --------
         document.getElementById('distrib-ingresos-total').textContent = fmtMillFull(ingresos);
 
-        // -------- Donut --------
+        // -------- Barras horizontales --------
         const ctx = document.getElementById('chartICGDistrib');
         if (!ctx) return;
 
         const datos = ingresos > 0
             ? [pctGastos * 100, pctCostos * 100, pctExcedente * 100]
-            : [1, 1, 1]; // placeholder visual cuando no hay ingresos
+            : [0, 0, 0];
+        const coloresFondo = [ICG_COLORS.gastos.bar, ICG_COLORS.costos.bar, ICG_COLORS.excedente.slice];
+        const coloresBorde = [ICG_COLORS.gastos.border, ICG_COLORS.costos.border, ICG_COLORS.excedente.line];
+        // Tope del eje X dinámico (un poco por encima del máximo, mínimo 70)
+        const maxDato = Math.max(...datos, 10);
+        const topeX = Math.min(100, Math.ceil((maxDato * 1.18) / 10) * 10);
 
         if (ICG_STATE.chartDistrib) {
             ICG_STATE.chartDistrib.data.datasets[0].data = datos;
+            ICG_STATE.chartDistrib.options.scales.x.max = topeX;
             ICG_STATE.chartDistrib.update();
             return;
         }
 
         ICG_STATE.chartDistrib = new Chart(ctx, {
-            type: 'doughnut',
+            type: 'bar',
             data: {
-                labels: ['Gastos (sin 53)', 'Costos', 'Excedente'],
+                labels: ['Gastos / Ingresos', 'Costos / Ingresos', 'Excedente / Ingresos'],
                 datasets: [{
                     data: datos,
-                    backgroundColor: [
-                        ICG_COLORS.gastos.bar,
-                        ICG_COLORS.costos.bar,
-                        ICG_COLORS.excedente.slice
-                    ],
-                    borderColor: [
-                        ICG_COLORS.gastos.border,
-                        ICG_COLORS.costos.border,
-                        ICG_COLORS.excedente.line
-                    ],
+                    backgroundColor: coloresFondo,
+                    borderColor: coloresBorde,
                     borderWidth: 1.5,
-                    hoverOffset: 8
+                    borderRadius: 8,
+                    barThickness: 34,
+                    maxBarThickness: 40
                 }]
             },
             options: {
+                indexAxis: 'y',
                 responsive: true,
-                maintainAspectRatio: true,
-                cutout: '62%',
-                layout: { padding: 8 },
+                maintainAspectRatio: false,
+                layout: { padding: { top: 6, bottom: 6, left: 4, right: 50 } },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -14642,13 +14800,24 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         titleFont: { weight: '700', size: 12 },
                         bodyFont: { size: 12.5, weight: '600' },
                         callbacks: {
-                            label: (c) => `  ${c.label}: ${c.parsed.toFixed(2).replace('.', ',')}%`
+                            label: (c) => `  ${c.parsed.x.toFixed(2).replace('.', ',')}% del ingreso`
                         }
                     },
                     datalabels: {
-                        color: (ctx) => ctx.dataIndex === 2 ? '#ffffff' : '#1c2520',
-                        font: { size: 12, weight: '700' },
-                        formatter: (v) => v >= 4 ? v.toFixed(2).replace('.', ',') + '%' : ''
+                        anchor: 'end', align: 'end', offset: 6,
+                        color: '#334155', font: { size: 12.5, weight: '700' },
+                        formatter: (v) => ingresos > 0 ? v.toFixed(2).replace('.', ',') + '%' : 'N/A'
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true, max: topeX,
+                        ticks: { callback: (v) => v + '%', font: { size: 10 }, color: '#94a3b8' },
+                        grid: { color: 'rgba(0,0,0,0.05)' }
+                    },
+                    y: {
+                        ticks: { font: { size: 12, weight: '600' }, color: '#334155' },
+                        grid: { display: false }
                     }
                 }
             }
@@ -16585,7 +16754,86 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         renderGruposMora(r);
         renderCategoriaMora(r);
         renderModalidadIndicadoresMora(idx);
+        renderTablaMora(idx);
         actualizarGraficoMora(idx);
+    }
+
+    // Tabla de detalle de Mora por modalidad: cartera vencida del mes
+    // anterior vs actual, variación e índice de mora por modalidad.
+    function renderTablaMora(idx) {
+        const cont = document.getElementById('mora-tabla');
+        if (!cont) return;
+        const r = DATOS_MOROSIDAD[idx];
+        const rAnt = (idx > 0) ? DATOS_MOROSIDAD[idx - 1] : null;
+        if (!r) { cont.innerHTML = ''; return; }
+
+        const mesActLabel = `${(MESES_NOMBRE[r.mes] || r.mes).slice(0,3)} ${r.anio}`;
+        const mesAntLabel = rAnt ? `${(MESES_NOMBRE[rAnt.mes] || rAnt.mes).slice(0,3)} ${rAnt.anio}` : 'Mes anterior';
+        const subEl = document.getElementById('mora-tabla-sub');
+        if (subEl) subEl.textContent =
+            `${MESES_NOMBRE[r.mes] || r.mes} ${r.anio} vs ${mesAntLabel} · Cartera vencida (mora) por modalidad e índice`;
+
+        // Mapa de mora e índice del mes anterior por código de grupo
+        const moraAntPorCod = {};
+        const idxAntPorCod = {};
+        if (rAnt) rAnt.grupos.forEach(g => { moraAntPorCod[g.codigo] = g.mora; idxAntPorCod[g.codigo] = g.indice_grupo; });
+
+        const COLORES_MOD = ['#237C70', '#36BAA8', '#2CAAEE', '#088DD5', '#6b7280'];
+        // Solo modalidades con cartera (subtotal > 0)
+        const grupos = r.grupos.filter(g => (g.subtotal || 0) > 0);
+
+        let thtml = `<thead><tr>
+            <th>Modalidad</th>
+            <th>Mora ${mesAntLabel} (M COP)</th>
+            <th>Mora ${mesActLabel} (M COP)</th>
+            <th>Variación (M COP)</th>
+            <th>Variación %</th>
+            <th>Índice ${mesAntLabel}</th>
+            <th>Índice ${mesActLabel}</th>
+            <th>Var. Índice (Pbs)</th>
+        </tr></thead><tbody>`;
+
+        grupos.forEach((g, i) => {
+            const color = COLORES_MOD[i % COLORES_MOD.length];
+            const moraAct = g.mora || 0;
+            const moraAnt = rAnt ? (moraAntPorCod[g.codigo] ?? null) : null;
+            const difAbs = (moraAnt != null) ? (moraAct - moraAnt) : null;
+            const varPct = (moraAnt != null && moraAnt > 0) ? (moraAct / moraAnt - 1) * 100 : null;
+            const idxMoraAct = (g.indice_grupo || 0) * 100;
+            const idxMoraAnt = (rAnt && idxAntPorCod[g.codigo] != null) ? idxAntPorCod[g.codigo] * 100 : null;
+            const varPbs = (idxMoraAnt != null) ? (idxMoraAct - idxMoraAnt) * 100 : null;
+            thtml += `<tr class="dep-producto-row">
+                <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${color}"></span>${g.nombre}</span></td>
+                <td class="dep-col-ant">${(moraAnt != null) ? fmtMillonesMora(moraAnt) : '—'}</td>
+                <td>${fmtMillonesMora(moraAct)}</td>
+                <td>${badgeVarPesos(difAbs)}</td>
+                <td>${badgeCrecDep(varPct)}</td>
+                <td class="dep-col-ant">${(idxMoraAnt != null) ? idxMoraAnt.toFixed(2).replace('.',',') + '%' : '—'}</td>
+                <td>${idxMoraAct.toFixed(2).replace('.',',')}%</td>
+                <td>${badgePbs(varPbs)}</td>
+            </tr>`;
+        });
+
+        // Total
+        const moraTotalAct = r.mora_total || 0;
+        const moraTotalAnt = rAnt ? (rAnt.mora_total || 0) : null;
+        const difTotal = (moraTotalAnt != null) ? (moraTotalAct - moraTotalAnt) : null;
+        const varTotalPct = (moraTotalAnt != null && moraTotalAnt > 0) ? (moraTotalAct / moraTotalAnt - 1) * 100 : null;
+        const idxTotalAct = (r.indice_mora || 0) * 100;
+        const idxTotalAnt = (rAnt && rAnt.indice_mora != null) ? rAnt.indice_mora * 100 : null;
+        const varPbsTotal = (idxTotalAnt != null) ? (idxTotalAct - idxTotalAnt) * 100 : null;
+        thtml += `<tr class="dep-total-row">
+            <td>TOTAL MORA</td>
+            <td class="dep-col-ant">${(moraTotalAnt != null) ? fmtMillonesMora(moraTotalAnt) : '—'}</td>
+            <td>${fmtMillonesMora(moraTotalAct)}</td>
+            <td>${badgeVarPesos(difTotal)}</td>
+            <td>${badgeCrecDep(varTotalPct)}</td>
+            <td class="dep-col-ant">${(idxTotalAnt != null) ? idxTotalAnt.toFixed(2).replace('.',',') + '%' : '—'}</td>
+            <td>${idxTotalAct.toFixed(2).replace('.',',')}%</td>
+            <td>${badgePbs(varPbsTotal)}</td>
+        </tr>`;
+        thtml += '</tbody>';
+        cont.innerHTML = thtml;
     }
 
     function poblarSelectorAnioMora() {
@@ -17622,7 +17870,88 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         renderCategoriaRiesgo(r);
         renderBrutaRiesgo(r);
         renderModalidadIndicadores(r);
+        renderTablaRiesgo(idx);
         actualizarGraficoRiesgo(idx);
+    }
+
+    // Tabla de detalle de Riesgo por modalidad: cartera en riesgo (B,C,D,E)
+    // del mes anterior vs actual, variación y calidad por modalidad.
+    function renderTablaRiesgo(idx) {
+        const cont = document.getElementById('riesgo-tabla');
+        if (!cont) return;
+        const r = DATOS_RIESGO[idx];
+        const rAnt = (idx > 0) ? DATOS_RIESGO[idx - 1] : null;
+        if (!r || !r.indicadores_riesgo_modalidad) { cont.innerHTML = ''; return; }
+
+        const mesActLabel = `${(MESES_NOMBRE[r.mes] || r.mes).slice(0,3)} ${r.anio}`;
+        const mesAntLabel = rAnt ? `${(MESES_NOMBRE[rAnt.mes] || rAnt.mes).slice(0,3)} ${rAnt.anio}` : 'Mes anterior';
+        const subEl = document.getElementById('riesgo-tabla-sub');
+        if (subEl) subEl.textContent =
+            `${MESES_NOMBRE[r.mes] || r.mes} ${r.anio} vs ${mesAntLabel} · Cartera en riesgo (B,C,D,E) por modalidad y calidad`;
+
+        const modAnt = rAnt ? rAnt.indicadores_riesgo_modalidad : {};
+        const COLORES_MOD = ['#237C70', '#36BAA8', '#2CAAEE', '#088DD5', '#6b7280'];
+
+        // Modalidades con cartera (denominador > 0)
+        const entradas = Object.entries(r.indicadores_riesgo_modalidad)
+            .filter(([k, v]) => (v.denominador || 0) > 0);
+
+        let thtml = `<thead><tr>
+            <th>Modalidad</th>
+            <th>En riesgo ${mesAntLabel} (M COP)</th>
+            <th>En riesgo ${mesActLabel} (M COP)</th>
+            <th>Variación (M COP)</th>
+            <th>Variación %</th>
+            <th>Calidad ${mesAntLabel}</th>
+            <th>Calidad ${mesActLabel}</th>
+            <th>Var. Calidad (Pbs)</th>
+        </tr></thead><tbody>`;
+
+        let totalRiesgoAct = 0, totalRiesgoAnt = 0, totalCartera = 0, totalCarteraAnt = 0;
+        entradas.forEach(([k, v], i) => {
+            const color = COLORES_MOD[i % COLORES_MOD.length];
+            const riesgoAct = v.numerador || 0;
+            const vAnt = modAnt ? modAnt[k] : null;
+            const riesgoAnt = (vAnt && rAnt) ? (vAnt.numerador || 0) : null;
+            const difAbs = (riesgoAnt != null) ? (riesgoAct - riesgoAnt) : null;
+            const varPct = (riesgoAnt != null && riesgoAnt > 0) ? (riesgoAct / riesgoAnt - 1) * 100 : null;
+            const calidadAct = (v.indice || 0) * 100;
+            const calidadAnt = (vAnt && rAnt && vAnt.indice != null) ? vAnt.indice * 100 : null;
+            const varPbs = (calidadAnt != null) ? (calidadAct - calidadAnt) * 100 : null;
+            totalRiesgoAct += riesgoAct;
+            if (riesgoAnt != null) totalRiesgoAnt += riesgoAnt;
+            totalCartera += v.denominador || 0;
+            if (vAnt) totalCarteraAnt += vAnt.denominador || 0;
+            thtml += `<tr class="dep-producto-row">
+                <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${color}"></span>${v.nombre}</span></td>
+                <td class="dep-col-ant">${(riesgoAnt != null) ? fmtMillonesMora(riesgoAnt) : '—'}</td>
+                <td>${fmtMillonesMora(riesgoAct)}</td>
+                <td>${badgeVarPesos(difAbs)}</td>
+                <td>${badgeCrecDep(varPct)}</td>
+                <td class="dep-col-ant">${(calidadAnt != null) ? calidadAnt.toFixed(2).replace('.',',') + '%' : '—'}</td>
+                <td>${calidadAct.toFixed(2).replace('.',',')}%</td>
+                <td>${badgePbs(varPbs)}</td>
+            </tr>`;
+        });
+
+        // Total
+        const difTotal = totalRiesgoAnt > 0 ? (totalRiesgoAct - totalRiesgoAnt) : null;
+        const varTotalPct = totalRiesgoAnt > 0 ? (totalRiesgoAct / totalRiesgoAnt - 1) * 100 : null;
+        const calidadTotal = totalCartera > 0 ? (totalRiesgoAct / totalCartera * 100) : 0;
+        const calidadTotalAnt = totalCarteraAnt > 0 ? (totalRiesgoAnt / totalCarteraAnt * 100) : null;
+        const varPbsTotal = (calidadTotalAnt != null) ? (calidadTotal - calidadTotalAnt) * 100 : null;
+        thtml += `<tr class="dep-total-row">
+            <td>TOTAL EN RIESGO</td>
+            <td class="dep-col-ant">${totalRiesgoAnt > 0 ? fmtMillonesMora(totalRiesgoAnt) : '—'}</td>
+            <td>${fmtMillonesMora(totalRiesgoAct)}</td>
+            <td>${badgeVarPesos(difTotal)}</td>
+            <td>${badgeCrecDep(varTotalPct)}</td>
+            <td class="dep-col-ant">${(calidadTotalAnt != null) ? calidadTotalAnt.toFixed(2).replace('.',',') + '%' : '—'}</td>
+            <td>${calidadTotal.toFixed(2).replace('.',',')}%</td>
+            <td>${badgePbs(varPbsTotal)}</td>
+        </tr>`;
+        thtml += '</tbody>';
+        cont.innerHTML = thtml;
     }
 
     function poblarSelectorAnioRiesgo() {
@@ -18581,7 +18910,79 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         setKpiCrec('crecimiento-kpi-riesgo', r.indicadores_crecimiento.riesgo);
 
         renderModalidadCrecimiento(r);
+        renderTablaCrecimiento(r);
         actualizarGraficoCrecimiento(idx);
+    }
+
+    // Construye la tabla de detalle por segmento de cartera (al final del módulo).
+    // Muestra saldo actual, saldo del mismo mes del año anterior (con el que
+    // se compara), crecimiento interanual y participación.
+    function renderTablaCrecimiento(r) {
+        const cont = document.getElementById('crecimiento-tabla');
+        if (!cont) return;
+        // Índice del período actual dentro de la serie de segmentos
+        const idxSeg = DATOS_CARTERA_SEGMENTOS.findIndex(x => x.anio === r.anio && x.mes === r.mes);
+        if (idxSeg < 0) { cont.innerHTML = ''; return; }
+        const seg = DATOS_CARTERA_SEGMENTOS[idxSeg];
+        const segAnt = (idxSeg > 0) ? DATOS_CARTERA_SEGMENTOS[idxSeg - 1] : null;
+
+        const mesActLabel = `${MESES_NOMBRE[r.mes] ? MESES_NOMBRE[r.mes].slice(0,3) : r.mes} ${r.anio}`;
+        const mesAntLabel = segAnt
+            ? `${MESES_NOMBRE[segAnt.mes] ? MESES_NOMBRE[segAnt.mes].slice(0,3) : segAnt.mes} ${segAnt.anio}`
+            : 'Mes anterior';
+
+        const subEl = document.getElementById('crecimiento-tabla-sub');
+        if (subEl) subEl.textContent =
+            `${MESES_NOMBRE[r.mes] || r.mes} ${r.anio} vs ${mesAntLabel} · Saldo del mes anterior, actual y variación mensual`;
+
+        const COLORES_SEG = {
+            vivienda: '#237C70', consumo_cl: '#36BAA8',
+            consumo_sl: '#2CAAEE', empleados: '#088DD5'
+        };
+        const total = seg.total || 0;
+        // Mapa rápido de saldo del mes anterior por id de segmento
+        const saldoAntPorId = {};
+        if (segAnt) segAnt.segmentos.forEach(x => { saldoAntPorId[x.id] = x.saldo; });
+
+        let thtml = `<thead><tr>
+            <th>Segmento</th>
+            <th>${mesAntLabel} (M COP)</th>
+            <th>${mesActLabel} (M COP)</th>
+            <th>Variación (M COP)</th>
+            <th>Variación %</th>
+            <th>Participacion</th>
+        </tr></thead><tbody>`;
+
+        seg.segmentos.forEach(s => {
+            const part = total > 0 ? (s.saldo / total * 100) : 0;
+            const color = COLORES_SEG[s.id] || '#64748b';
+            const ant = segAnt ? (saldoAntPorId[s.id] ?? null) : null;
+            const difAbs = (ant != null) ? (s.saldo - ant) : null;
+            const crecPct = (ant != null && ant > 0) ? (s.saldo / ant - 1) * 100 : null;
+            thtml += `<tr class="dep-producto-row">
+                <td><span class="dep-prod-nombre"><span class="dep-prod-punto" style="background:${color}"></span>${s.nombre}</span></td>
+                <td class="dep-col-ant">${(ant != null) ? fmtMillonesMora(ant) : '—'}</td>
+                <td>${fmtMillonesMora(s.saldo)}</td>
+                <td>${badgeVarPesos(difAbs)}</td>
+                <td>${badgeCrecDep(crecPct)}</td>
+                <td>${part.toFixed(2).replace('.',',')}%</td>
+            </tr>`;
+        });
+
+        // Total
+        const totalAnt = segAnt ? (segAnt.total || 0) : null;
+        const difTotalAbs = (totalAnt != null) ? (total - totalAnt) : null;
+        const crecTotal = (totalAnt != null && totalAnt > 0) ? (total / totalAnt - 1) * 100 : null;
+        thtml += `<tr class="dep-total-row">
+            <td>TOTAL CARTERA</td>
+            <td class="dep-col-ant">${(totalAnt != null) ? fmtMillonesMora(totalAnt) : '—'}</td>
+            <td>${fmtMillonesMora(total)}</td>
+            <td>${badgeVarPesos(difTotalAbs)}</td>
+            <td>${badgeCrecDep(crecTotal)}</td>
+            <td>100,0%</td>
+        </tr>`;
+        thtml += '</tbody>';
+        cont.innerHTML = thtml;
     }
 
     function poblarSelectorAnioCrecimiento() {
