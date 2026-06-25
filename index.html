@@ -8009,15 +8009,48 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         const borderColor = opts.borderColor || 'rgba(71,85,105,0.18)';
         const color = opts.color || '#1c2520';
         const soloIdx = (opts.soloIdx === undefined) ? null : opts.soloIdx;
+        // Separación mínima (en px) entre etiquetas para que no se pisen.
+        const minGap = opts.minGap || 54;
         return {
             display: (ctx) => {
-                if (soloIdx === null) return true;          // todas
-                return ctx.dataIndex === soloIdx;            // solo el punto pedido
+                if (soloIdx !== null) return ctx.dataIndex === soloIdx;  // solo el punto pedido
+                // Anti-solapamiento: ocultar etiquetas demasiado cercanas a una ya visible.
+                // Recorremos los puntos del dataset y vamos "reservando" posiciones X.
+                const meta = ctx.chart.getDatasetMeta(ctx.datasetIndex);
+                if (!meta || !meta.data || !meta.data[ctx.dataIndex]) return true;
+                const xActual = meta.data[ctx.dataIndex].x;
+                // Siempre mostrar el primero y el último
+                const n = ctx.dataset.data.length;
+                if (ctx.dataIndex === 0 || ctx.dataIndex === n - 1) return true;
+                // Buscar la última etiqueta visible antes de ésta
+                for (let j = ctx.dataIndex - 1; j >= 0; j--) {
+                    const pj = meta.data[j];
+                    if (!pj) continue;
+                    // ¿Está visible la etiqueta j? Aplicamos la misma regla de gap hacia atrás
+                    const xj = pj.x;
+                    if (Math.abs(xActual - xj) < minGap) {
+                        // Demasiado cerca de un vecino: solo mostramos si j es "saltado"
+                        // (estrategia: mostrar 1 de cada N según el gap)
+                        return false;
+                    }
+                    break;
+                }
+                return true;
             },
-            align: 'top',
+            align: (ctx) => {
+                // Cuando solo se muestra el punto actual y éste cae en el tercio
+                // derecho (donde suele estar el header con valor/variación de la
+                // tarjeta), bajamos la etiqueta para que no se pisen.
+                if (soloIdx !== null) {
+                    const n = ctx.dataset.data.length;
+                    if (ctx.dataIndex >= n - Math.ceil(n / 3)) return 'bottom';
+                }
+                return 'top';
+            },
             anchor: 'center',
             offset: 12,
             clamp: true,
+            clip: false,
             backgroundColor: 'rgba(255,255,255,0.98)',
             borderRadius: 10,
             borderColor: borderColor,
@@ -8026,6 +8059,27 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             color: color,
             font: { family: "'JetBrains Mono', monospace", size: 10, weight: '700' },
             formatter: formatter
+        };
+    }
+
+    // Display anti-solapamiento reutilizable para datalabels definidos inline.
+    // Muestra siempre el primero, el último y los extremos; oculta los
+    // intermedios que queden a menos de `minGap` px de la última etiqueta mostrada.
+    function displayNoSolapado(minGap) {
+        minGap = minGap || 50;
+        return (ctx) => {
+            const meta = ctx.chart.getDatasetMeta(ctx.datasetIndex);
+            if (!meta || !meta.data || !meta.data[ctx.dataIndex]) return true;
+            const n = ctx.dataset.data.length;
+            const i = ctx.dataIndex;
+            if (i === 0 || i === n - 1) return true;       // extremos siempre
+            const xi = meta.data[i].x;
+            for (let j = i - 1; j >= 0; j--) {
+                if (!meta.data[j]) continue;
+                if (Math.abs(xi - meta.data[j].x) < minGap) return false;
+                break;
+            }
+            return true;
         };
     }
 
@@ -8206,7 +8260,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         }
                     },
                     datalabels: {
-                        display: true,
+                        display: displayNoSolapado(50),
                         align: 'top',
                         anchor: 'center',
                         offset: 12,
@@ -8286,7 +8340,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         }
                     },
                     datalabels: {
-                        display: true,
+                        display: displayNoSolapado(50),
                         align: 'top',
                         anchor: 'end',
                         offset: 6,
@@ -12568,7 +12622,27 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                             label: (item) => 'Saldo: ' + fmtDepMillEs(item.parsed.y) + ' M'
                         }
                     },
-                    datalabels: dataLabelsCajita((v) => v !== null ? fmtDepMillEs(v) : '', { borderColor: color + '55', color: '#1c2520', soloIdx: idxActual })
+                    datalabels: {
+                        display: (ctx) => ctx.dataIndex === idxActual,
+                        align: (ctx) => {
+                            // El header (nombre + valor + variación) está arriba-derecha.
+                            // Si el punto actual está en el tercio derecho del gráfico,
+                            // bajamos la etiqueta para que no se pise con ese header.
+                            const n = ctx.dataset.data.length;
+                            return (ctx.dataIndex >= n - Math.ceil(n / 3)) ? 'bottom' : 'top';
+                        },
+                        anchor: 'center',
+                        offset: 12,
+                        clamp: true, clip: false,
+                        backgroundColor: 'rgba(255,255,255,0.98)',
+                        borderRadius: 10,
+                        borderColor: color + '55',
+                        borderWidth: 1,
+                        padding: { top: 4, bottom: 4, left: 9, right: 9 },
+                        color: '#1c2520',
+                        font: { family: "'JetBrains Mono', monospace", size: 10, weight: '700' },
+                        formatter: (v) => v !== null ? fmtDepMillEs(v) : ''
+                    }
                 },
                 scales: {
                     y: { min: ejeInfo.niceMin, max: ejeInfo.niceMax, grace: 0, display: false, grid: { display: false } },
@@ -16217,7 +16291,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         }
                     },
                     datalabels: {
-                        display: true,
+                        display: displayNoSolapado(50),
                         align: 'top',
                         anchor: 'center',
                         offset: 12,
@@ -17064,7 +17138,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         }
                     },
                     datalabels: {
-                        display: true,
+                        display: displayNoSolapado(50),
                         align: 'top',
                         anchor: 'center',
                         offset: 12,
@@ -18256,7 +18330,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                         }
                     },
                     datalabels: {
-                        display: true,
+                        display: displayNoSolapado(50),
                         align: 'top',
                         anchor: 'center',
                         offset: 12,
