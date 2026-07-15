@@ -107,21 +107,73 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             transition: opacity 0.3s ease;
         }
         @media (max-width: 640px) {
-            /* En móvil el header no reserva espacio lateral para el logo
-               (el logo es pequeño arriba-izquierda y el header se reordena). */
-            .header { padding-left: 0; padding-top: 56px; }
+            /* ---- LOGO EN MÓVIL ----
+               En móvil el logo NO es fijo: va dentro del flujo del documento,
+               en una barra propia arriba del todo. Así al hacer scroll sube con
+               el contenido y nunca queda flotando encima de las tarjetas. */
             #logo-febor-fijo {
-                position: fixed !important;
-                top: 12px;
-                bottom: auto;
-                left: 12px;
-                width: 88px;
-                z-index: 10002;
+                position: static !important;
+                display: block;
+                width: 104px;
+                margin: 0 0 14px 0;
+                top: auto; left: auto; bottom: auto; right: auto;
+                z-index: auto;
+                filter: drop-shadow(0 1px 3px rgba(0,0,0,0.08));
             }
-            /* El menú deja de centrar vertical y arranca bajo el logo */
+            /* El header ya no necesita reservar espacio para un logo flotante */
+            .header {
+                padding-left: 0;
+                padding-top: 0;
+                display: block;
+            }
+            .container {
+                padding-top: 14px;
+            }
+            /* El menú principal arranca normal (el logo ocupa su lugar en el flujo) */
             .menu-principal {
                 justify-content: flex-start;
-                padding-top: 92px;
+                padding-top: 0;
+            }
+            .menu-header { margin-top: 0; }
+
+            /* ---- CONTROLES DEL MÓDULO EN MÓVIL ----
+               Título y controles se apilan; los selectores ocupan el ancho
+               completo para que no se salga el texto por el margen. */
+            .header-titulo {
+                width: 100%;
+                margin-bottom: 16px;
+            }
+            .header-acciones {
+                width: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .filtros {
+                width: 100%;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+            .filtro-card {
+                width: 100%;
+                min-width: 0;          /* permite encoger sin desbordar */
+                box-sizing: border-box;
+                padding: 8px 10px;
+                gap: 6px;
+            }
+            .filtro-card select {
+                width: 100%;
+                min-width: 0;
+                padding: 6px 6px;
+                font-size: 13px;
+            }
+            /* Botones de acción a ancho completo y centrados */
+            .btn-excel, .btn-pdf {
+                width: 100%;
+                justify-content: center;
+                box-sizing: border-box;
             }
         }
 
@@ -1231,18 +1283,79 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .modulo-card:nth-child(4) { animation-delay: 0.26s; }
         .modulo-card:nth-child(5) { animation-delay: 0.33s; }
 
+        /* ================================================================
+           ESTILO B · ACENTO LATERAL  →  tarjetas de SUBMÓDULOS
+           Tarjeta blanca con franja de color a la izquierda y brillo al hover
+           ================================================================ */
+        .modulo-card {
+            background: #ffffff;
+            border: 1px solid #e8edea;
+            padding-left: 26px;
+            box-shadow: 0 4px 14px rgba(70,90,80,0.07);
+        }
         .modulo-card::before {
             content: "";
             position: absolute;
             top: 0; left: 0;
-            width: 100%; height: 3px;
-            background: var(--card-color);
-            opacity: 0.85;
+            width: 7px; height: 100%;
+            background: linear-gradient(180deg, var(--card-color) 0%, var(--card-color-deep) 100%);
+            opacity: 1;
         }
-
+        /* Brillo de color en la esquina, visible al pasar el mouse */
+        .modulo-card::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: radial-gradient(circle at 100% 0%, var(--card-color-soft) 0%, transparent 58%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.35s;
+        }
         .modulo-card:hover {
-            transform: translateY(-6px);
+            transform: translateY(-7px);
+            border-color: var(--card-color-glow);
+            box-shadow: 0 16px 34px -10px var(--card-color-glow), 0 4px 10px rgba(0,0,0,0.07);
         }
+        .modulo-card:hover::after { opacity: 1; }
+
+        /* ================================================================
+           ESTILO A · GRADIENTE VIVO  →  4 MÓDULOS PRINCIPALES (.modulo-hero)
+           Tarjeta pintada por completo con el color del módulo
+           ================================================================ */
+        .modulo-card.modulo-hero {
+            background: linear-gradient(135deg, var(--card-color-light) 0%, var(--card-color) 48%, var(--card-color-deep) 100%);
+            border: none;
+            padding-left: 20px;
+            color: #ffffff;
+            box-shadow: 0 10px 26px -8px var(--card-color-glow), 0 3px 8px rgba(0,0,0,0.10);
+        }
+        /* Círculos de luz decorativos */
+        .modulo-hero::before {
+            content: "";
+            position: absolute;
+            top: -45%; right: -25%; left: auto;
+            width: 190px; height: 190px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.13);
+            pointer-events: none;
+        }
+        .modulo-hero::after {
+            content: "";
+            position: absolute;
+            bottom: -55%; left: -20%; top: auto;
+            width: 170px; height: 170px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.07);
+            opacity: 1;
+            pointer-events: none;
+        }
+        .modulo-hero:hover {
+            transform: translateY(-7px) scale(1.02);
+            border-color: transparent;
+            box-shadow: 0 20px 40px -10px var(--card-color-glow), 0 6px 14px rgba(0,0,0,0.16);
+        }
+        .modulo-hero:hover::after { opacity: 1; }
 
         /* Colores por módulo (variables CSS) */
         .modulo-activo {
@@ -1250,6 +1363,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             --card-color-soft: rgba(54,186,168,0.10);
             --card-color-glow: rgba(54,186,168,0.25);
             --card-color-deep: #237C70;
+            --card-color-light: #3FD9C4;
             box-shadow: var(--neu-out);
         }
         .modulo-activo:hover {
@@ -1261,6 +1375,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             --card-color-soft: rgba(8,141,213,0.10);
             --card-color-glow: rgba(8,141,213,0.25);
             --card-color-deep: #045988;
+            --card-color-light: #3FB6F5;
             box-shadow: var(--neu-out);
         }
         .modulo-pasivo:hover {
@@ -1272,6 +1387,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             --card-color-soft: rgba(96,57,163,0.10);
             --card-color-glow: rgba(96,57,163,0.25);
             --card-color-deep: #3C2367;
+            --card-color-light: #9B6FE0;
             box-shadow: var(--neu-out);
         }
         .modulo-patrimonio:hover {
@@ -1283,6 +1399,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             --card-color-soft: rgba(23,165,61,0.10);
             --card-color-glow: rgba(23,165,61,0.25);
             --card-color-deep: #11782C;
+            --card-color-light: #3FD968;
             box-shadow: var(--neu-out);
         }
         .modulo-ingresos:hover {
@@ -2543,6 +2660,33 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             fill: none;
         }
 
+        /* ---------- ESTILO B: ícono en degradado con su sombra ---------- */
+        .modulo-card:not(.modulo-hero) .modulo-icono {
+            background: linear-gradient(135deg, var(--card-color) 0%, var(--card-color-deep) 100%);
+            box-shadow: 0 5px 14px -3px var(--card-color-glow);
+        }
+        .modulo-card:not(.modulo-hero) .modulo-icono svg { stroke: #ffffff; }
+        .modulo-card:not(.modulo-hero):hover .modulo-icono {
+            background: linear-gradient(135deg, var(--card-color) 0%, var(--card-color-deep) 100%);
+            box-shadow: 0 9px 20px -4px var(--card-color-glow);
+            transform: scale(1.10) rotate(-4deg);
+        }
+
+        /* ---------- ESTILO A: contenido en blanco sobre el gradiente ---------- */
+        .modulo-hero .modulo-icono {
+            background: rgba(255,255,255,0.20);
+            backdrop-filter: blur(4px);
+            position: relative;
+            z-index: 1;
+        }
+        .modulo-hero .modulo-icono svg { stroke: #ffffff; }
+        .modulo-hero:hover .modulo-icono {
+            background: rgba(255,255,255,0.32);
+            transform: scale(1.08) rotate(-4deg);
+        }
+        .modulo-hero .modulo-titulo { color: #ffffff; position: relative; z-index: 1; }
+        .modulo-hero .modulo-descripcion { color: rgba(255,255,255,0.90); position: relative; z-index: 1; }
+        .modulo-hero .modulo-accion { color: #ffffff; position: relative; z-index: 1; }
         /* Badge "Próximamente" o "Activo" */
         .modulo-badge {
             position: absolute;
@@ -2567,6 +2711,19 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         .modulo-badge.proximamente {
             background: rgba(0,0,0,0.05);
             color: #6b7268;
+        }
+
+        /* En las tarjetas hero (estilo A) el badge va translúcido sobre el color.
+           Va después de las variantes .activo/.proximamente para prevalecer. */
+        .modulo-hero .modulo-badge,
+        .modulo-hero .modulo-badge.activo,
+        .modulo-hero .modulo-badge.proximamente {
+            background: rgba(255,255,255,0.24);
+            color: #ffffff;
+            border: 1px solid rgba(255,255,255,0.35);
+            backdrop-filter: blur(4px);
+            position: absolute;
+            z-index: 2;
         }
 
         /* ====================================================== */
@@ -2604,28 +2761,47 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         }
 
         /* Tarjeta contenedora de cada matriz — glassmorphism */
+        /* ===== Cajones del tablero: mismo lenguaje visual que las
+           tarjetas de los módulos principales (estilo A, gradiente vivo) ===== */
         .matriz-card {
-            background: var(--neu-bg);
             border: none;
             border-radius: 22px;
             padding: 24px 24px 16px;
             margin-bottom: 28px;
-            box-shadow: var(--neu-out);
             position: relative;
             overflow: hidden;
+            color: #ffffff;
+            transition: box-shadow 0.35s ease;
         }
+        /* Círculos de luz decorativos, como en las tarjetas hero */
         .matriz-card::before {
             content: "";
             position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 4px;
-            opacity: 0.9;
+            top: -50%; right: -8%; left: auto;
+            width: 260px; height: 260px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.10);
+            pointer-events: none;
+            opacity: 1;
         }
-        .matriz-pct::before {
-            background: linear-gradient(90deg, #36BAA8, #4D61B4, #6039A3);
+        .matriz-card::after {
+            content: "";
+            position: absolute;
+            bottom: -60%; left: -6%;
+            width: 220px; height: 220px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+            pointer-events: none;
         }
-        .matriz-money::before {
-            background: linear-gradient(90deg, #4D61B4, #6039A3, #F78502);
+        /* Indicadores (%): turquesa → azul (Activo + Pasivo) */
+        .matriz-pct {
+            background: linear-gradient(135deg, #3FD9C4 0%, #36BAA8 38%, #088DD5 100%);
+            box-shadow: 0 12px 30px -10px rgba(54,186,168,0.55), 0 3px 8px rgba(0,0,0,0.10);
+        }
+        /* Saldos y Resultados: morado → verde (Patrimonio + ICG) */
+        .matriz-money {
+            background: linear-gradient(135deg, #9B6FE0 0%, #6039A3 42%, #17A53D 100%);
+            box-shadow: 0 12px 30px -10px rgba(96,57,163,0.55), 0 3px 8px rgba(0,0,0,0.10);
         }
 
         .matriz-card-head {
@@ -2648,17 +2824,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             align-items: center;
             gap: 10px;
             flex-shrink: 0;
+            position: relative;
+            z-index: 1;
         }
         .matriz-toggle-pill {
             font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.6px;
-            color: #64748b;
-            background: rgba(100,116,139,0.10);
-            border: 1px solid rgba(100,116,139,0.18);
+            color: #ffffff;
+            background: rgba(255,255,255,0.20);
+            border: 1px solid rgba(255,255,255,0.35);
             border-radius: 999px;
             padding: 5px 13px;
+            backdrop-filter: blur(4px);
             transition: all 0.2s ease;
         }
         .matriz-toggle-pill::after {
@@ -2668,25 +2847,26 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             content: "Desplegar";
         }
         .matriz-card-head:hover .matriz-toggle-pill {
-            color: #1e293b;
-            background: rgba(100,116,139,0.16);
+            color: #ffffff;
+            background: rgba(255,255,255,0.32);
         }
         .matriz-toggle-chevron {
             width: 22px;
             height: 22px;
             fill: none;
-            stroke: #64748b;
+            stroke: #ffffff;
             stroke-width: 2.5;
             stroke-linecap: round;
             stroke-linejoin: round;
             transform: rotate(180deg);
-            transition: transform 0.35s ease, stroke 0.2s ease;
+            transition: transform 0.35s ease, opacity 0.2s ease;
+            opacity: 0.85;
         }
         .matriz-card.matriz-colapsada .matriz-toggle-chevron {
             transform: rotate(0deg);
         }
         .matriz-card-head:hover .matriz-toggle-chevron {
-            stroke: #1e293b;
+            opacity: 1;
         }
 
         /* Cuerpo colapsable (animación con grid-template-rows) */
@@ -2694,10 +2874,28 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             display: grid;
             grid-template-rows: 1fr;
             transition: grid-template-rows 0.4s ease;
+            position: relative;
+            z-index: 1;
         }
+        /* La tabla va sobre un panel blanco para que se lea nítida
+           (el gradiente de color queda como marco y encabezado). */
         .matriz-cuerpo-inner {
             overflow: hidden;
             min-height: 0;
+            background: #ffffff;
+            border-radius: 16px;
+        }
+        .matriz-card:not(.matriz-colapsada) .matriz-cuerpo-inner {
+            padding: 14px 14px 6px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+        }
+        /* El hint vive dentro del panel blanco: color gris, no hereda el blanco */
+        .matriz-hint {
+            font-size: 11.5px;
+            color: #94a3b8;
+            font-style: italic;
+            text-align: right;
+            padding: 8px 4px 4px;
         }
         .matriz-card.matriz-colapsada .matriz-cuerpo {
             grid-template-rows: 0fr;
@@ -2716,24 +2914,29 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             font-weight: 800;
             color: #fff;
             flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+            background: rgba(255,255,255,0.20);
+            backdrop-filter: blur(4px);
+            transition: background 0.3s, transform 0.3s;
         }
-        .matriz-pct .matriz-card-ico {
-            background: linear-gradient(135deg, #36BAA8, #6039A3);
-            box-shadow: 0 6px 18px rgba(54,186,168,0.4);
-        }
-        .matriz-money .matriz-card-ico {
-            background: linear-gradient(135deg, #4D61B4, #F78502);
-            box-shadow: 0 6px 18px rgba(77,97,180,0.4);
+        .matriz-card-head:hover .matriz-card-ico {
+            background: rgba(255,255,255,0.32);
+            transform: scale(1.06);
         }
         .matriz-card-head h3 {
             font-size: 17px;
             font-weight: 700;
             margin: 0 0 2px;
-            color: #1e293b;
+            color: #ffffff;
+            position: relative;
+            z-index: 1;
         }
         .matriz-card-head span {
             font-size: 12px;
-            color: #94a3b8;
+            color: rgba(255,255,255,0.88);
+            position: relative;
+            z-index: 1;
         }
 
         /* Scroll container de la matriz */
@@ -4712,7 +4915,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <div class="menu-grid">
 
             <!-- ACTIVO -->
-            <div class="modulo-card modulo-activo" onclick="abrirActivo()">
+            <div class="modulo-card modulo-hero modulo-activo" onclick="abrirActivo()">
                 <span class="modulo-badge activo">Disponible</span>
                 <div class="modulo-icono">
                     <svg viewBox="0 0 24 24">
@@ -4730,7 +4933,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             </div>
 
             <!-- PASIVO -->
-            <div class="modulo-card modulo-pasivo" onclick="abrirPasivo()">
+            <div class="modulo-card modulo-hero modulo-pasivo" onclick="abrirPasivo()">
                 <span class="modulo-badge activo">Disponible</span>
                 <div class="modulo-icono">
                     <svg viewBox="0 0 24 24">
@@ -4748,7 +4951,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             </div>
 
             <!-- PATRIMONIO -->
-            <div class="modulo-card modulo-patrimonio" onclick="abrirPatrimonio()">
+            <div class="modulo-card modulo-hero modulo-patrimonio" onclick="abrirPatrimonio()">
                 <span class="modulo-badge activo">Disponible</span>
                 <div class="modulo-icono">
                     <svg viewBox="0 0 24 24">
@@ -4766,7 +4969,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             </div>
 
             <!-- INGRESOS, COSTOS Y GASTOS -->
-            <div class="modulo-card modulo-ingresos" onclick="abrirSubmenuIngresos()">
+            <div class="modulo-card modulo-hero modulo-ingresos" onclick="abrirSubmenuIngresos()">
                 <span class="modulo-badge activo">Disponible</span>
                 <div class="modulo-icono">
                     <svg viewBox="0 0 24 24">
