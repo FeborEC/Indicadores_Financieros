@@ -2403,6 +2403,152 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             gap: 14px;
             margin-top: 12px;
         }
+        /* ===== Variante LISTA: una tarjeta por fila, a todo el ancho.
+           Pensada para que ningún nombre de cuenta quede recortado.
+           Solo la usan Evolución de Activo / Pasivo / Patrimonio; el módulo
+           ICG conserva la rejilla de 3 columnas. ===== */
+        .evolucion-subcuentas-grid.evolucion-subcuentas-lista {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        .evolista-card {
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 14px 18px;
+            box-shadow: var(--neu-white-out);
+            transition: box-shadow 0.2s;
+        }
+        .evolista-card.evo-sin-mov {
+            background: #f9fafb;
+            box-shadow: none;
+            border: 1px dashed #e2e8f0;
+            padding: 10px 18px;
+            opacity: 0.75;
+        }
+        .evolista-card.evo-subcuenta-memo { border: 1px dashed #cbd5e1; }
+        .evolista-head {
+            display: grid;
+            grid-template-columns: 18px auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+        }
+        .evolista-card.expandible .evolista-head { cursor: pointer; }
+        .evolista-chev {
+            font-size: 13px;
+            line-height: 1;
+            color: var(--evolista-color, #64748b);
+            animation: chevLatidoX 1.7s ease-in-out infinite;
+        }
+        .evolista-card.abierta .evolista-chev { animation: none; opacity: 1; transform: none; }
+        .evolista-nombre {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1c2520;
+            letter-spacing: 0.01em;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        .evolista-cifras {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            white-space: nowrap;
+        }
+        .evolista-saldo { font-size: 17px; font-weight: 800; }
+        .evolista-peso { font-size: 11.5px; color: #7a8a7e; font-style: italic; }
+        .evolista-bar {
+            height: 6px;
+            background: #eef2f0;
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 9px;
+        }
+        .evolista-bar-fill { height: 100%; border-radius: 999px; }
+        .evolista-cuerpo {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #eef2f0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        /* Filas de 4 dígitos */
+        .evolista-h4 { padding: 4px 0; }
+        .evolista-h4.expandible { cursor: pointer; }
+        .evolista-h4-top {
+            display: grid;
+            grid-template-columns: 16px 62px minmax(0, 1fr) auto auto;
+            align-items: baseline;
+            gap: 10px;
+        }
+        .evolista-chev4 {
+            font-size: 12px;
+            line-height: 1;
+            color: var(--evolista-color, #94a3b8);
+            animation: chevLatidoX 1.7s ease-in-out infinite;
+        }
+        .evolista-h4.abierta .evolista-chev4 { animation: none; opacity: 1; transform: none; }
+        .evolista-cod4, .evolista-cod6 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--evolista-color, #475569);
+        }
+        .evolista-nom4 {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #334155;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        .evolista-val4 { font-size: 12.5px; font-weight: 700; color: #1c2520; text-align: right; white-space: nowrap; }
+        .evolista-pct4 { font-size: 11.5px; color: #64748b; text-align: right; min-width: 62px; white-space: nowrap; }
+        .evolista-track {
+            height: 4px;
+            background: #f1f5f4;
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 5px 0 0 88px;
+        }
+        .evolista-fill { height: 100%; border-radius: 999px; min-width: 2px; }
+        /* Filas de 6 dígitos */
+        .evolista-h6 {
+            margin: 8px 0 2px 88px;
+            padding: 8px 12px;
+            background: #f8fafb;
+            border-radius: 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .evolista-fila6 {
+            display: grid;
+            grid-template-columns: 76px minmax(0, 1fr) auto auto;
+            align-items: baseline;
+            gap: 10px;
+            font-size: 11.5px;
+        }
+        .evolista-nom6 { color: #475569; white-space: normal; overflow-wrap: anywhere; }
+        .evolista-val6 { font-weight: 700; color: #334155; text-align: right; white-space: nowrap; }
+        .evolista-pct6 { color: #94a3b8; text-align: right; min-width: 62px; white-space: nowrap; }
+        .evolista-link {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: #64748b;
+            font-style: italic;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .evolista-link:hover { color: #1c2520; text-decoration: underline; }
+        @media (max-width: 700px) {
+            .evolista-head { grid-template-columns: 18px auto minmax(0, 1fr); }
+            .evolista-cifras { grid-column: 1 / -1; margin-left: 28px; }
+            .evolista-h4-top { grid-template-columns: 16px 56px minmax(0, 1fr); }
+            .evolista-val4, .evolista-pct4 { grid-column: span 1; text-align: left; margin-left: 82px; }
+            .evolista-track, .evolista-h6 { margin-left: 0; }
+            .evolista-fila6 { grid-template-columns: 70px minmax(0, 1fr); }
+            .evolista-val6, .evolista-pct6 { text-align: left; margin-left: 80px; }
+        }
         .evo-subcuenta-card {
             background: #ffffff;
             border: none;
@@ -6842,7 +6988,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <div class="section seccion-evolucion-composicion">
             <h2 class="section-title">Composición por Subcuentas</h2>
             <p class="seccion-subtitulo">Detalle de las subcuentas de 2 dígitos del Activo en el período seleccionado</p>
-            <div id="evolucion-activo-subcuentas" class="evolucion-subcuentas-grid"></div>
+            <div id="evolucion-activo-subcuentas" class="evolucion-subcuentas-grid evolucion-subcuentas-lista"></div>
         </div>
     </div>
 
@@ -6916,7 +7062,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <div class="section seccion-evolucion-composicion">
             <h2 class="section-title">Composición por Subcuentas</h2>
             <p class="seccion-subtitulo">Detalle de las subcuentas de 2 dígitos del Pasivo en el período seleccionado</p>
-            <div id="evolucion-pasivo-subcuentas" class="evolucion-subcuentas-grid"></div>
+            <div id="evolucion-pasivo-subcuentas" class="evolucion-subcuentas-grid evolucion-subcuentas-lista"></div>
         </div>
     </div>
 
@@ -6990,7 +7136,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <div class="section seccion-evolucion-composicion">
             <h2 class="section-title">Composición por Subcuentas</h2>
             <p class="seccion-subtitulo">Detalle de las subcuentas de 2 dígitos del Patrimonio en el período seleccionado</p>
-            <div id="evolucion-patrimonio-subcuentas" class="evolucion-subcuentas-grid"></div>
+            <div id="evolucion-patrimonio-subcuentas" class="evolucion-subcuentas-grid evolucion-subcuentas-lista"></div>
         </div>
     </div>
 
@@ -14227,75 +14373,94 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         r.subcuentas.forEach(sub => {
             const card = document.createElement('div');
             const esSint = !!sub.sintetica;
-            card.className = 'evo-subcuenta-card'
-                + (esSint ? ' evo-subcuenta-memo'
-                          : (sub.tiene_movimiento ? ' evo-clickable' : ' evo-sin-mov'));
+            const hijos = sub.hijos || [];
+            const expandible = hijos.length > 0;
+            card.className = 'evolista-card'
+                + (esSint ? ' evo-subcuenta-memo' : (sub.tiene_movimiento ? '' : ' evo-sin-mov'))
+                + (expandible ? ' expandible' : '');
+            card.style.setProperty('--evolista-color', cfg.color);
             const peso = (sub.peso * 100).toFixed(2).replace('.', ',') + '%';
 
-            // Desagregado: mini-barras del siguiente nivel; cada una se
-            // despliega para mostrar su propio detalle (igual que en ICG).
-            const hijos = sub.hijos || [];
-            const barrasHTML = hijos.map(h => {
+            // ---- Detalle: cuentas de 4 dígitos y, dentro de cada una, las de 6.
+            // A todo el ancho, con los nombres completos (sin recortar).
+            const detalleHTML = hijos.map(h => {
                 const pesoH = sub.saldo > 0 ? (h.saldo / sub.saldo * 100) : 0;
                 const nietos = h.hijos || [];
                 const exp = nietos.length > 0;
                 const filasN = nietos.map(n => {
                     const pesoN = h.saldo > 0 ? (n.saldo / h.saldo * 100) : 0;
                     return `
-                        <div class="icg-mb-fila6">
-                            <span class="icg-mb-cod6">${n.codigo}</span>
-                            <span class="icg-mb-nom6" title="${n.nombre}">${n.nombre}</span>
-                            <span class="icg-mb-val6">${fmtMillones(n.saldo)}</span>
-                            <span class="icg-mb-pct6">${pesoN.toFixed(2).replace('.', ',')}%</span>
+                        <div class="evolista-fila6">
+                            <span class="evolista-cod6">${n.codigo}</span>
+                            <span class="evolista-nom6">${n.nombre}</span>
+                            <span class="evolista-val6">${fmtMillones(n.saldo)}</span>
+                            <span class="evolista-pct6">${pesoN.toFixed(2).replace('.', ',')}%</span>
                         </div>`;
                 }).join('');
                 return `
-                    <div class="icg-mb-item ${exp ? 'icg-mb-exp' : ''}">
-                        <div class="icg-mb-top">
-                            <span class="icg-mb-lbl">
-                                ${exp ? '<span class="icg-mb-chev">▸</span>' : ''}
-                                <span class="icg-mb-cod">${h.codigo}</span>
-                                <span class="icg-mb-nom" title="${h.nombre}">${h.nombre}</span>
-                            </span>
-                            <span class="icg-mb-val">${fmtMillones(h.saldo)} <span class="icg-mb-pct">${pesoH.toFixed(2).replace('.', ',')}%</span></span>
+                    <div class="evolista-h4 ${exp ? 'expandible' : ''}">
+                        <div class="evolista-h4-top">
+                            <span class="evolista-chev4">${exp ? '▸' : ''}</span>
+                            <span class="evolista-cod4">${h.codigo}</span>
+                            <span class="evolista-nom4">${h.nombre}</span>
+                            <span class="evolista-val4">${fmtMillones(h.saldo)}</span>
+                            <span class="evolista-pct4">${pesoH.toFixed(2).replace('.', ',')}%</span>
                         </div>
-                        <div class="icg-mb-track"><div class="icg-mb-fill" style="width:${Math.min(100, pesoH)}%; background:linear-gradient(90deg, ${colorMedio}, ${cfg.color});"></div></div>
-                        ${exp ? `<div class="icg-mb-hijos oculto">${filasN}</div>` : ''}
+                        <div class="evolista-track"><div class="evolista-fill" style="width:${Math.min(100, pesoH)}%; background:linear-gradient(90deg, ${colorMedio}, ${cfg.color});"></div></div>
+                        ${exp ? `<div class="evolista-h6 oculto">${filasN}</div>` : ''}
                     </div>`;
             }).join('');
 
             card.innerHTML = `
-                <div class="evo-subcuenta-head">
+                <div class="evolista-head">
+                    <span class="evolista-chev">${expandible ? '▸' : ''}</span>
                     <span class="evo-subcuenta-codigo">${esSint ? 'Memo' : sub.codigo}</span>
-                    ${(sub.tiene_movimiento && !esSint) ? '<span class="evo-subcuenta-link">Ver histórico ›</span>' : ''}
+                    <span class="evolista-nombre">${sub.nombre}${sub.nota ? ` <span class="evo-subcuenta-nota">· ${sub.nota}</span>` : ''}</span>
+                    <span class="evolista-cifras">
+                        <span class="evolista-saldo" style="color:${cfg.colorVar};">${fmtMillones(sub.saldo)}</span>
+                        <span class="evolista-peso">${peso} del total</span>
+                        ${(sub.tiene_movimiento && !esSint) ? '<span class="evolista-link">Ver histórico ›</span>' : ''}
+                    </span>
                 </div>
-                <div class="evo-subcuenta-nombre">${sub.nombre}</div>
-                <div class="evo-subcuenta-saldo" style="color:${cfg.colorVar};">${fmtMillones(sub.saldo)}</div>
-                <div class="evo-subcuenta-peso">${peso} del total${sub.nota ? ` · <span class="evo-subcuenta-nota">${sub.nota}</span>` : ''}</div>
-                <div class="evo-subcuenta-bar">
-                    <div class="evo-subcuenta-bar-fill" style="width:${Math.min(100, sub.peso * 100)}%; background:${cfg.color};"></div>
-                </div>
-                ${hijos.length > 0 ? `<div class="icg-mb-wrap" style="--mb-color:${cfg.color};">${barrasHTML}</div>` : ''}
+                ${sub.tiene_movimiento ? `<div class="evolista-bar"><div class="evolista-bar-fill" style="width:${Math.min(100, sub.peso * 100)}%; background:${cfg.color};"></div></div>` : ''}
+                ${expandible ? `<div class="evolista-cuerpo oculto">${detalleHTML}</div>` : ''}
             `;
 
-            // El desagregado nunca abre el modal: solo despliega su nivel inferior
-            const wrap = card.querySelector('.icg-mb-wrap');
-            if (wrap) {
-                wrap.addEventListener('click', (ev) => {
-                    ev.stopPropagation();
-                    const item = ev.target.closest('.icg-mb-item.icg-mb-exp');
-                    if (!item) return;
-                    const hijosDiv = item.querySelector('.icg-mb-hijos');
-                    const chev = item.querySelector('.icg-mb-chev');
-                    if (!hijosDiv) return;
-                    const abierto = !hijosDiv.classList.toggle('oculto');
-                    if (chev) chev.textContent = abierto ? '▾' : '▸';
-                    item.classList.toggle('abierto', abierto);
+            // Clic en la cabecera → despliega/pliega el detalle de la subcuenta
+            if (expandible) {
+                card.querySelector('.evolista-head').addEventListener('click', (ev) => {
+                    if (ev.target.closest('.evolista-link')) return;
+                    const cuerpo = card.querySelector('.evolista-cuerpo');
+                    const chev = card.querySelector('.evolista-chev');
+                    const abierta = !cuerpo.classList.toggle('oculto');
+                    chev.textContent = abierta ? '▾' : '▸';
+                    card.classList.toggle('abierta', abierta);
                 });
             }
-            // Clic en el cuerpo de la tarjeta → histórico de la subcuenta (como antes)
-            if (sub.tiene_movimiento && !esSint) {
-                card.onclick = () => abrirHistoricoSubcuenta(tipo, sub.codigo);
+
+            // Clic en una fila de 4 dígitos con detalle → despliega sus 6 dígitos
+            const cuerpo = card.querySelector('.evolista-cuerpo');
+            if (cuerpo) {
+                cuerpo.addEventListener('click', (ev) => {
+                    const fila = ev.target.closest('.evolista-h4.expandible');
+                    if (!fila) return;
+                    ev.stopPropagation();
+                    const det = fila.querySelector('.evolista-h6');
+                    const chev = fila.querySelector('.evolista-chev4');
+                    if (!det) return;
+                    const abierta = !det.classList.toggle('oculto');
+                    if (chev) chev.textContent = abierta ? '▾' : '▸';
+                    fila.classList.toggle('abierta', abierta);
+                });
+            }
+
+            // "Ver histórico" abre el modal de la subcuenta
+            const link = card.querySelector('.evolista-link');
+            if (link) {
+                link.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    abrirHistoricoSubcuenta(tipo, sub.codigo);
+                });
             }
             grid.appendChild(card);
         });
