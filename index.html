@@ -9014,7 +9014,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
             <!-- RESUMEN PARA EL ANÁLISIS DE SOLVENCIA -->
             <div class="section acc-resumen-solv">
-                <h2 class="section-title">Resumen para el Análisis de Solvencia</h2>
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Resumen para el Análisis de Solvencia</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarResumenSolvencia()" title="Copiar este cuadro como imagen o para Excel">
+                        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                        <span>Copiar</span>
+                    </button>
+                </div>
                 <p class="seccion-subtitulo" id="solv-resumen-sub">—</p>
                 <div class="solv-resumen-grid">
                     <div class="solv-resumen-bloque">
@@ -9732,6 +9738,178 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                        ${celdaVar(a, p ? b : null, sentido, tipo === 'p')}</tr>`;
             });
             document.getElementById('solv-resumen-pt').innerHTML = h2 + '</tbody>';
+        }
+
+        // ===== Copiar un cuadro HTML como imagen / para Excel (genérico) =====
+        // Lee las tablas tal como están en pantalla (texto, negritas, colores y mini barras).
+        function _leerTablaDOM(tabla) {
+            const enc = [...tabla.querySelectorAll('thead th')].map(th => th.innerText.trim());
+            const filas = [...tabla.querySelectorAll('tbody tr')].map(tr => ({
+                clase: tr.className || '',
+                celdas: [...tr.cells].map(td => {
+                    const barra = td.querySelector('.solv-part > span');
+                    return {
+                        texto: td.innerText.trim(),
+                        num: td.classList.contains('num'),
+                        color: td.style.color || null,
+                        negrita: (td.style.fontWeight === '700'),
+                        barra: barra ? parseFloat(barra.style.width) || 0 : null
+                    };
+                })
+            }));
+            return { enc, filas };
+        }
+        function _dibujarBloquesTabla(titulo, subtitulo, bloques, acento) {
+            const S = 2, FUENTE = "'Poppins', 'Segoe UI', Arial, sans-serif";
+            const PAD = 26, ALTO_TIT = 62, ALTO_BLQ = 30, ALTO_ENC = 30, ALTO_FILA = 26, SEP = 18, ALTO_PIE = 28, ANCHO_BARRA = 44;
+            const med = document.createElement('canvas').getContext('2d');
+            const ancho = (t, peso, tam) => { med.font = `${peso} ${tam}px ${FUENTE}`; return med.measureText(t).width; };
+            // Anchos de columna por bloque
+            bloques.forEach(b => {
+                const nCol = b.datos.enc.length;
+                b.w = Array.from({ length: nCol }, (_, j) => Math.max(
+                    ancho(b.datos.enc[j].toUpperCase(), 700, 10) + 22,
+                    ...b.datos.filas.map(f => f.celdas[j] ? ancho(f.celdas[j].texto, 700, 12) + 22 + (f.celdas[j].barra !== null ? ANCHO_BARRA + 8 : 0) : 0)));
+                b.w[0] = Math.max(b.w[0], 230);
+                b.ancho = b.w.reduce((a, c) => a + c, 0);
+            });
+            const anchoTabla = Math.max(...bloques.map(b => b.ancho), ancho(titulo, 700, 17) + 20);
+            bloques.forEach(b => { const extra = anchoTabla - b.ancho; b.w[0] += extra; });   // concepto absorbe el sobrante
+            const W = PAD * 2 + anchoTabla;
+            const H = PAD * 2 + ALTO_TIT + bloques.reduce((a, b) => a + ALTO_BLQ + ALTO_ENC + b.datos.filas.length * ALTO_FILA + SEP, 0) + ALTO_PIE;
+            const cv = document.createElement('canvas'); cv.width = W * S; cv.height = H * S;
+            const g = cv.getContext('2d'); g.scale(S, S); g.textBaseline = 'middle';
+            const texto = (t, x, y, o = {}) => { g.font = `${o.peso || 500} ${o.tam || 12}px ${FUENTE}`; g.fillStyle = o.color || '#334155'; g.textAlign = o.alin || 'left'; g.fillText(t, x, y); };
+            const rect = (x, y, w, h, c, r = 0) => { g.fillStyle = c; g.beginPath(); if (r && g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); g.fill(); };
+            const linea = (y, c, w = 1) => { g.strokeStyle = c; g.lineWidth = w; g.beginPath(); g.moveTo(PAD, y + 0.5); g.lineTo(PAD + anchoTabla, y + 0.5); g.stroke(); };
+            rect(0, 0, W, H, '#ffffff');
+            g.strokeStyle = '#e6ece8'; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+            rect(PAD, PAD + 4, 4, 26, acento, 2);
+            texto(titulo, PAD + 14, PAD + 12, { peso: 700, tam: 17, color: '#0f172a' });
+            texto(subtitulo, PAD + 14, PAD + 34, { tam: 11.5, color: '#64748b' });
+            let y = PAD + ALTO_TIT;
+            bloques.forEach(b => {
+                rect(PAD, y, anchoTabla, ALTO_BLQ, acento, 8); rect(PAD, y + ALTO_BLQ - 8, anchoTabla, 8, acento);
+                texto(b.titulo.toUpperCase(), PAD + 12, y + ALTO_BLQ / 2, { peso: 700, tam: 11, color: '#ffffff' });
+                y += ALTO_BLQ;
+                rect(PAD, y, anchoTabla, ALTO_ENC, '#f6f4fa');
+                let x = PAD;
+                b.datos.enc.forEach((h, j) => {
+                    const der = j > 0;
+                    texto(h.toUpperCase(), der ? x + b.w[j] - 11 : x + 11, y + ALTO_ENC / 2, { peso: 700, tam: 10, color: '#64748b', alin: der ? 'right' : 'left' });
+                    x += b.w[j];
+                });
+                y += ALTO_ENC;
+                b.datos.filas.forEach((f, i) => {
+                    const total = f.clase.includes('solv-total'), clave = f.clase.includes('solv-clave');
+                    if (total) { rect(PAD, y, anchoTabla, ALTO_FILA, '#f1f5f9'); linea(y, '#cbd5e1', 1.5); }
+                    else if (clave) rect(PAD, y, anchoTabla, ALTO_FILA, '#f7f4fc');
+                    else if (i % 2 === 1) rect(PAD, y, anchoTabla, ALTO_FILA, '#fbfcfb');
+                    let x2 = PAD;
+                    f.celdas.forEach((c, j) => {
+                        const yc = y + ALTO_FILA / 2;
+                        const peso = total || clave || c.negrita ? 700 : (j === 0 ? 500 : 500);
+                        const color = c.color || (clave ? '#4E2D85' : (total ? '#0f172a' : '#334155'));
+                        if (c.barra !== null) {
+                            const bx = x2 + b.w[j] - 11 - ancho(c.texto, peso, 12) - 8 - ANCHO_BARRA;
+                            rect(bx, yc - 3, ANCHO_BARRA, 6, '#eef0f4', 3);
+                            if (c.barra > 0) rect(bx, yc - 3, Math.max(2, ANCHO_BARRA * c.barra / 100), 6, acento, 3);
+                        }
+                        texto(c.texto, c.num ? x2 + b.w[j] - 11 : x2 + 11, yc, { peso, tam: 12, color, alin: c.num ? 'right' : 'left' });
+                        x2 += b.w[j];
+                    });
+                    linea(y + ALTO_FILA - 1, '#eef2f0');
+                    y += ALTO_FILA;
+                });
+                y += SEP;
+            });
+            texto('FEBOR · Indicadores Financieros', PAD, y + 6, { tam: 10, color: '#94a3b8' });
+            return cv;
+        }
+        function _htmlExcelBloques(titulo, subtitulo, bloques, acentoHex) {
+            const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;background:#ffffff;border:none;border-bottom:1px solid #e5ece7;white-space:nowrap;';
+            let html = `<table style="border-collapse:collapse;"><tr><td colspan="8" style="${base}border:none;font-size:12pt;font-weight:bold;color:${acentoHex};">${titulo}</td></tr>`
+                     + `<tr><td colspan="8" style="${base}border:none;color:#64748b;">${subtitulo}</td></tr>`;
+            const lineas = [titulo, subtitulo];
+            bloques.forEach(b => {
+                html += `<tr><td colspan="${b.datos.enc.length}" style="${base}background:${acentoHex};color:#ffffff;font-weight:bold;">${b.titulo}</td></tr><tr>`;
+                b.datos.enc.forEach((h, j) => html += `<td style="${base}font-weight:bold;color:#64748b;background:#f6f4fa;text-align:${j ? 'right' : 'left'};">${h}</td>`);
+                html += '</tr>';
+                lineas.push('', b.titulo, b.datos.enc.join('\t'));
+                b.datos.filas.forEach(f => {
+                    const total = f.clase.includes('solv-total') || f.clase.includes('solv-clave');
+                    html += '<tr>' + f.celdas.map((c, j) => `<td style="${base}${total ? 'font-weight:bold;' : ''}${c.color ? `color:${c.color};font-weight:bold;` : ''}text-align:${c.num ? 'right' : 'left'};">${c.texto}</td>`).join('') + '</tr>';
+                    lineas.push(f.celdas.map(c => c.texto).join('\t'));
+                });
+                html += '<tr><td style="border:none;">&nbsp;</td></tr>';
+            });
+            return { html: html + '</table>', texto: lineas.join('\n') };
+        }
+        // Modal genérico de copia (reutiliza el estilo del modal de comparativos)
+        const COPIA_MODAL = { canvas: null, html: '', texto: '', archivo: 'cuadro.png' };
+        function abrirModalCopia(cfg) {
+            let m = document.getElementById('copia-modal');
+            if (!m) {
+                m = document.createElement('div');
+                m.id = 'copia-modal'; m.className = 'eeff-modal oculto';
+                m.innerHTML = `<div class="eeff-modal-caja" role="dialog" aria-modal="true">
+                    <div class="eeff-modal-cab">
+                        <div><div class="eeff-modal-titulo" id="copia-modal-titulo"></div><div class="eeff-modal-sub" id="copia-modal-sub"></div></div>
+                        <button class="eeff-modal-cerrar" onclick="document.getElementById('copia-modal').classList.add('oculto')" aria-label="Cerrar">✕</button>
+                    </div>
+                    <div class="eeff-modal-vista"><img id="copia-modal-img" alt="Vista previa del cuadro"></div>
+                    <div class="eeff-modal-pie">
+                        <span class="eeff-modal-estado" id="copia-modal-estado"></span>
+                        <button class="eeff-modal-btn" onclick="_accionModalCopia('excel')">Copiar para Excel</button>
+                        <button class="eeff-modal-btn" onclick="_accionModalCopia('descargar')">Descargar PNG</button>
+                        <button class="eeff-modal-btn principal" onclick="_accionModalCopia('imagen')">Copiar imagen</button>
+                    </div>
+                </div>`;
+                m.addEventListener('click', e => { if (e.target === m) m.classList.add('oculto'); });
+                document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.add('oculto'); });
+                document.body.appendChild(m);
+            }
+            Object.assign(COPIA_MODAL, cfg);
+            document.getElementById('copia-modal-titulo').textContent = cfg.titulo;
+            document.getElementById('copia-modal-sub').textContent = cfg.subtitulo;
+            document.getElementById('copia-modal-estado').textContent = '';
+            const img = document.getElementById('copia-modal-img');
+            img.src = cfg.canvas.toDataURL('image/png');
+            img.style.width = (cfg.canvas.width / 2) + 'px';
+            m.classList.remove('oculto');
+        }
+        async function _accionModalCopia(accion) {
+            const estado = document.getElementById('copia-modal-estado');
+            const blobPromesa = new Promise(res => COPIA_MODAL.canvas.toBlob(res, 'image/png'));
+            try {
+                if (accion === 'descargar') { saveAs(await blobPromesa, COPIA_MODAL.archivo); estado.textContent = 'Imagen descargada'; }
+                else if (accion === 'imagen') {
+                    try {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromesa })]);
+                        estado.textContent = '¡Imagen copiada! Pégala con Ctrl+V';
+                    } catch (e) {
+                        saveAs(await blobPromesa, COPIA_MODAL.archivo);
+                        estado.textContent = 'Tu navegador no permite copiar imágenes: se descargó el PNG';
+                    }
+                } else {
+                    await _copiarTablaPortapapeles(COPIA_MODAL.html, COPIA_MODAL.texto);
+                    estado.textContent = '¡Tabla copiada! Pégala en Excel con Ctrl+V';
+                }
+            } catch (e) { estado.textContent = 'No se pudo completar: ' + e.message; }
+        }
+
+        async function copiarResumenSolvencia() {
+            if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            const titulo = 'Resumen para el Análisis de Solvencia';
+            const subtitulo = document.getElementById('solv-resumen-sub').textContent;
+            const bloques = [
+                { titulo: 'Activos ponderados por riesgo por grupo', datos: _leerTablaDOM(document.getElementById('solv-resumen-apr')) },
+                { titulo: 'Patrimonio técnico y solvencia', datos: _leerTablaDOM(document.getElementById('solv-resumen-pt')) },
+            ];
+            const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#4E2D85');
+            const { html, texto } = _htmlExcelBloques(titulo, subtitulo, bloques, '#4E2D85');
+            abrirModalCopia({ titulo, subtitulo, canvas, html, texto,
+                archivo: 'Resumen_Solvencia_' + subtitulo.split(' · ')[0].replace(/\s+/g, '_') + '.png' });
         }
 
         function renderPeriodo(idx) {
