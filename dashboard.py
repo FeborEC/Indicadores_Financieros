@@ -5146,6 +5146,38 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 .mod-sidebar {{ padding-left: 12px; padding-right: 12px !important; min-height: 0; }}
             }}
 
+            /* Resumen compacto para el análisis de solvencia */
+            .solv-resumen-grid {{ display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; }}
+            @media (max-width: 1750px) {{ .solv-resumen-grid {{ grid-template-columns: 1fr; }} }}
+            .solv-resumen-bloque {{ border: 1px solid #e6ece8; border-radius: 12px; overflow: hidden; background: #ffffff; }}
+            .solv-resumen-titulo {{
+                padding: 10px 14px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.4px; color: #4E2D85; background: #f7f5fb; border-bottom: 1px solid #ece8f4;
+            }}
+            .solv-resumen-wrap {{ overflow-x: auto; }}
+            .solv-resumen-tabla {{ width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }}
+            .solv-resumen-tabla th {{
+                padding: 8px 12px; text-align: left; font-size: 10.5px; font-weight: 700; color: #64748b;
+                text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+            }}
+            .solv-resumen-tabla td {{ padding: 6px 12px; border-bottom: 1px solid #f1f5f3; color: #334155; white-space: nowrap; }}
+            .solv-resumen-tabla td:first-child {{ white-space: normal; min-width: 180px; }}
+            .solv-resumen-tabla .num {{ text-align: right; }}
+            .solv-resumen-tabla tr.solv-total td {{ font-weight: 800; color: #0f172a; background: #f8fafc; border-top: 1.5px solid #cbd5e1; }}
+            .solv-resumen-tabla tr.solv-clave td {{ font-weight: 700; color: #4E2D85; background: #faf8fd; }}
+            .solv-part {{ display: inline-block; width: 46px; height: 6px; margin-right: 8px; vertical-align: middle;
+                          background: #eef0f4; border-radius: 99px; overflow: hidden; }}
+            .solv-part > span {{ display: block; height: 100%; background: #6039A3; border-radius: 99px; }}
+            
+            /* Solvencia: todos los cuadros con fondo blanco */
+            #dashboard-root .section,
+            #dashboard-root .grupo-detalle,
+            #dashboard-root .grupo-detalle summary,
+            #dashboard-root .grupo-detalle table,
+            #dashboard-root .limite-card,
+            #dashboard-root .resumen-formula {{ background: #ffffff !important; }}
+            #dashboard-root .grupo-detalle {{ border-color: #e6ece8; }}
+
             /* Distribución del ingreso por período: fondo blanco */
             .section.seccion-icg-distrib-evo {{ background: #ffffff !important; }}
             .seccion-icg-distrib-evo .icg-leyenda {{ background: #ffffff; border: 1px solid #eef2f0; }}
@@ -11825,6 +11857,22 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="limites-grid" id="limites-grid"></div>
             </div>
             
+            <!-- RESUMEN PARA EL ANÁLISIS DE SOLVENCIA -->
+            <div class="section acc-resumen-solv">
+                <h2 class="section-title">Resumen para el Análisis de Solvencia</h2>
+                <p class="seccion-subtitulo" id="solv-resumen-sub">—</p>
+                <div class="solv-resumen-grid">
+                    <div class="solv-resumen-bloque">
+                        <div class="solv-resumen-titulo">Activos ponderados por riesgo por grupo</div>
+                        <div class="solv-resumen-wrap"><table class="solv-resumen-tabla" id="solv-resumen-apr"></table></div>
+                    </div>
+                    <div class="solv-resumen-bloque">
+                        <div class="solv-resumen-titulo">Patrimonio técnico y solvencia</div>
+                        <div class="solv-resumen-wrap"><table class="solv-resumen-tabla" id="solv-resumen-pt"></table></div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- ACTIVOS -->
             <div class="section acc-activos">
                 <h2 class="section-title">Detalle de Activos Ponderados por Riesgo</h2>
@@ -12463,9 +12511,78 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         // ===== RENDER PRINCIPAL =====
+        // ===== Resumen compacto para el análisis de solvencia =====
+        function renderResumenSolvencia(idx) {{
+            const r = DATOS[idx], p = idx > 0 ? DATOS[idx - 1] : null;
+            if (!r) return;
+            const fm = v => (v === null || v === undefined || isNaN(v)) ? '—' : fmtMillones(v);
+            const pc = v => (v === null || v === undefined || isNaN(v)) ? '—' : (v * 100).toFixed(2).replace('.', ',') + '%';
+            // Celda de variación con flecha y semáforo (sentido: +1 subir es bueno, −1 malo)
+            const celdaVar = (act, ant, sentido, enPuntos) => {{
+                if (act === null || act === undefined || ant === null || ant === undefined || isNaN(act) || isNaN(ant)) return '<td class="num">—</td>';
+                const d = act - ant;
+                // En puntos porcentuales el umbral de "estable" es ±0,10 pts (d × 5 frente al ±0,5% general)
+                const rel = enPuntos ? d * 5 : (ant !== 0 ? d / Math.abs(ant) : null);
+                const sem = _semaforoEEFF(d, rel, sentido);
+                const txt = enPuntos ? `${{d >= 0 ? '+' : ''}}${{(d * 100).toFixed(2).replace('.', ',')}} pts`
+                                     : (rel === null ? fm(d) : `${{d >= 0 ? '+' : ''}}${{(rel * 100).toFixed(2).replace('.', ',')}}%`);
+                return `<td class="num" style="color:${{sem ? sem.color : '#64748b'}};font-weight:700;">${{sem ? sem.flecha + ' ' : ''}}${{txt}}</td>`;
+            }};
+            const etqAnt = p ? `${{MESES_NOMBRE[p.mes]}} ${{p.anio}}` : 'sin mes anterior';
+            document.getElementById('solv-resumen-sub').textContent =
+                `${{MESES_NOMBRE[r.mes]}} ${{r.anio}} · millones de $ · variaciones frente a ${{etqAnt}}`;
+
+            // --- Bloque 1: APR por grupo ---
+            const apr = r.apr_total || 0;
+            let h = `<thead><tr><th>Grupo</th><th class="num">Valor</th><th class="num">Ponderado</th>
+                     <th class="num" title="Ponderado / Valor">Pond. prom.</th><th class="num">% del APR</th><th class="num">Var. ponderado</th></tr></thead><tbody>`;
+            for (const [nombre, g] of Object.entries(r.grupos_activos)) {{
+                const gAnt = p && p.grupos_activos[nombre];
+                const part = apr ? g.subtotal_ponderado / apr : null;
+                h += `<tr><td>${{nombre}}</td><td class="num">${{fm(g.subtotal_valor)}}</td><td class="num">${{fm(g.subtotal_ponderado)}}</td>
+                      <td class="num">${{g.subtotal_valor ? pc(g.subtotal_ponderado / g.subtotal_valor) : '—'}}</td>
+                      <td class="num"><span class="solv-part"><span style="width:${{Math.min(100, Math.max(0, (part || 0) * 100))}}%"></span></span>${{pc(part)}}</td>
+                      ${{celdaVar(g.subtotal_ponderado, gAnt ? gAnt.subtotal_ponderado : null, -1)}}</tr>`;
+            }}
+            h += `<tr><td>Cuentas contingentes</td><td class="num">—</td><td class="num">${{fm(r.subtotal_contingentes)}}</td><td class="num">—</td>
+                  <td class="num"><span class="solv-part"><span style="width:${{apr ? Math.min(100, r.subtotal_contingentes / apr * 100) : 0}}%"></span></span>${{pc(apr ? r.subtotal_contingentes / apr : null)}}</td>
+                  ${{celdaVar(r.subtotal_contingentes, p ? p.subtotal_contingentes : null, -1)}}</tr>`;
+            h += `<tr class="solv-total"><td>Total APR</td><td class="num"></td><td class="num">${{fm(apr)}}</td><td class="num"></td><td class="num">100,00%</td>
+                  ${{celdaVar(apr, p ? p.apr_total : null, -1)}}</tr></tbody>`;
+            document.getElementById('solv-resumen-apr').innerHTML = h;
+
+            // --- Bloque 2: patrimonio técnico y solvencia ---
+            const req = r.solvencia_requerida || 0.09, reqAnt = p ? (p.solvencia_requerida || 0.09) : null;
+            const minimo = x => x ? x.apr_total * (x.solvencia_requerida || 0.09) : null;
+            const exceso = x => x ? x.patrimonio_tecnico - minimo(x) : null;
+            const capacidad = x => x ? x.patrimonio_tecnico / (x.solvencia_requerida || 0.09) - x.apr_total : null;
+            const filas = [
+                ['Patrimonio básico', r.patrimonio_basico, p && p.patrimonio_basico, 1, 'm'],
+                ['(−) Deducciones', r.total_deducciones, p && p.total_deducciones, -1, 'm'],
+                ['(+) Patrimonio adicional', r.patrimonio_adicional, p && p.patrimonio_adicional, 1, 'm'],
+                ['Patrimonio técnico', r.patrimonio_tecnico, p && p.patrimonio_tecnico, 1, 'm', 'total'],
+                ['Activos ponderados por riesgo', apr, p && p.apr_total, -1, 'm'],
+                ['Solvencia (PT / APR)', r.solvencia, p && p.solvencia, 1, 'p', 'total'],
+                ['Mínimo requerido', req, reqAnt, 0, 'p'],
+                ['Holgura sobre el mínimo', r.holgura_solvencia, p && p.holgura_solvencia, 1, 'p'],
+                ['Patrimonio mínimo requerido (9% × APR)', minimo(r), minimo(p), -1, 'm'],
+                ['Exceso de patrimonio sobre el mínimo', exceso(r), exceso(p), 1, 'm', 'clave'],
+                ['APR adicional que se puede asumir', capacidad(r), capacidad(p), 1, 'm', 'clave'],
+            ];
+            let h2 = `<thead><tr><th>Concepto</th><th class="num">${{MESES_NOMBRE[r.mes].substring(0, 3)}} ${{r.anio}}</th>
+                      <th class="num">${{p ? MESES_NOMBRE[p.mes].substring(0, 3) + ' ' + p.anio : 'Mes ant.'}}</th><th class="num">Variación</th></tr></thead><tbody>`;
+            filas.forEach(([lbl, a, b, sentido, tipo, estilo]) => {{
+                const f = tipo === 'p' ? pc : fm;
+                h2 += `<tr class="${{estilo ? 'solv-' + estilo : ''}}"><td>${{lbl}}</td><td class="num">${{f(a)}}</td><td class="num">${{p ? f(b) : '—'}}</td>
+                       ${{celdaVar(a, p ? b : null, sentido, tipo === 'p')}}</tr>`;
+            }});
+            document.getElementById('solv-resumen-pt').innerHTML = h2 + '</tbody>';
+        }}
+
         function renderPeriodo(idx) {{
             const r = DATOS[idx];
             if (!r) return;
+            renderResumenSolvencia(idx);
             
             document.getElementById('gauge-periodo').textContent = `${{MESES_NOMBRE[r.mes]}} de ${{r.anio}}`;
             actualizarGauge(r);
@@ -21722,7 +21839,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: {{ mode: 'index', intersect: false }},
-                    layout: {{ padding: {{ top: 14, bottom: 4, left: 4, right: 4 }} }},
+                    layout: {{ padding: {{ top: 24, bottom: 4, left: 4, right: 4 }} }},
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
@@ -21742,7 +21859,21 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                 label: (ctx) => `  ${{ctx.dataset.label}}: ${{fmtFull(ctx.parsed.y)}} M COP`
                             }}
                         }},
-                        datalabels: {{ display: false }}
+                        // Etiquetas inteligentes: valor encima de cada barra (2 decimales);
+                        // 'auto' oculta solo las que chocan; el período seleccionado se resalta.
+                        datalabels: {{
+                            display: (c) => {{
+                                const v = c.dataset.data[c.dataIndex];
+                                if (!v) return false;
+                                return c.dataIndex === (config.idxActual ?? IDX_DEFAULT) ? true : 'auto';
+                            }},
+                            anchor: 'end', align: 'top', offset: 3,
+                            clamp: true, clip: false,
+                            formatter: (v) => fmtFull(v),
+                            color: (c) => c.dataIndex === (config.idxActual ?? IDX_DEFAULT) ? '#0f172a' : '#475569',
+                            font: (c) => ({{ family: "'JetBrains Mono', monospace", size: 9.5,
+                                             weight: c.dataIndex === (config.idxActual ?? IDX_DEFAULT) ? '800' : '600' }})
+                        }}
                     }},
                     scales: {{
                         y: {{
