@@ -5985,7 +5985,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .mc-tablero tr.solv-total .mc-tab-fija {{ background: #f8fafc; }}
             .mc-tablero tr.solv-clave .mc-tab-fija {{ background: #faf8fd; }}
             .mc-tablero thead .mc-tab-fija {{ background: #ffffff; }}
-            .mc-tablero .mc-tab-actual {{ background: #fff4ec !important; font-weight: 800; color: #B5452B; }}
+            .mc-tablero .mc-tab-actual {{ background: #f1f5f9 !important; font-weight: 800; color: #0f172a; }}
             .mc-tablero .mc-tab-anio {{ border-left: 1px dashed #e2c7b8; }}
             .mc-tablero .mc-lupa {{ margin: 0 6px 0 0; }}
             .mc-kpi-lbl .mc-lupa {{ margin: 0 10px 0 0; vertical-align: -6px; }}
@@ -13631,8 +13631,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const orig = [t, ...t.querySelectorAll('*')], copia = [cl, ...cl.querySelectorAll('*')];
             copia.forEach((e, i) => {{
                 const cs = getComputedStyle(orig[i]);
-                let st = TC_PROPS.map(p => `${{p}}:${{cs.getPropertyValue(p)}}`).join(';');
+                // Misma fuente al medir y al dibujar la imagen (evita que se corte la última fila)
+                let st = TC_PROPS.map(p => p === 'font-family' ? "font-family:'Segoe UI', Arial, sans-serif" : `${{p}}:${{cs.getPropertyValue(p)}}`).join(';');
                 if (cs.display === 'none') st += ';display:none';
+                // Puntos, chips y etiquetas de color: conservan su forma y tamaño
+                else if (!/^(TABLE|THEAD|TBODY|TR|TD|TH)$/.test(e.tagName))
+                    st += ['display', 'width', 'height', 'min-width', 'border-radius', 'margin-left', 'margin-right', 'vertical-align', 'background-image']
+                          .map(p => `;${{p}}:${{cs.getPropertyValue(p)}}`).join('');
                 if (e.tagName === 'TABLE') st += ';width:auto;margin:0';
                 e.setAttribute('style', st + ';position:static');
                 e.removeAttribute('class'); e.removeAttribute('id');
@@ -13677,7 +13682,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 caja.appendChild(b.tabla);
             }});
             document.body.appendChild(caja);
-            const W = Math.ceil(caja.scrollWidth) + 2, H = Math.ceil(caja.scrollHeight) + 2;
+            const W = Math.ceil(caja.scrollWidth) + 6, H = Math.ceil(caja.scrollHeight) + 10;
             caja.style.position = 'static';
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{W}}" height="${{H}}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="background:#fff;">${{new XMLSerializer().serializeToString(caja)}}</div></foreignObject></svg>`;
             caja.remove();
@@ -15817,17 +15822,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const tabla = document.getElementById(clave + '-tablero'), wrap = tabla.parentElement;
             const fija = tabla.querySelector('th.mc-tab-fija').offsetWidth;
             const visible = _visibleScrollMC(wrap, n, fija);
-            const datos = _leerTablaDOM(tabla);
+            const info = {{ tipo: 'columnas', idx: [...Array(n).keys()].map(i => i + 1) }};   // columna 0 = indicador
             abrirModalCopia({{ generar: async (rango) => {{
+                if (document.fonts && document.fonts.ready) await document.fonts.ready;
                 const idxs = _idxsRangoMC(rango, st.idx, visible);
-                const d = {{ enc: [datos.enc[0], ...idxs.map(i => datos.enc[i + 1])],
-                            filas: datos.filas.map(f => ({{ clase: f.clase, celdas: [f.celdas[0], ...idxs.map(i => f.celdas[i + 1])] }})) }};
-                const titulo = `Tablero histórico · ${{clave === 'mat' ? 'MAT' : 'CAMEL'}}`;
+                const clon = _tcClonar(tabla, info, new Set(idxs.map(i => i + 1)));
+                const titulo = `Tablero histórico de indicadores · ${{clave === 'mat' ? 'MAT' : 'CAMEL'}}`;
                 const subtitulo = _txtRangoMC(rango, idxs);
-                const bloques = [{{ titulo: 'Indicadores', datos: d }}];
-                const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#B5452B');
-                const {{ html, texto }} = _htmlExcelBloques(titulo, subtitulo, bloques, '#B5452B');
-                return {{ titulo, subtitulo, canvas, html, texto, archivo: `Tablero_${{clave.toUpperCase()}}_${{rango}}.png` }};
+                const ex = _tcExcel(titulo, subtitulo, [{{ titulo: '', tabla: clon }}]);
+                const img = await _tcImagen([{{ titulo: '', tabla: clon.cloneNode(true) }}]);
+                const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H);
+                L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
+                return {{ titulo, subtitulo, canvas: L.cv, html: ex.html, texto: ex.texto, archivo: `Tablero_${{clave.toUpperCase()}}_${{rango}}.png` }};
             }} }});
         }}
         async function copiarInstrumentoMC(clave) {{
@@ -16123,12 +16129,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         // Copiar las tablas de MAT / CAMEL (imagen o Excel) con el modal genérico
         async function copiarTablaMC(clave) {{
             if (document.fonts && document.fonts.ready) await document.fonts.ready;
-            const titulo = clave === 'mat' ? 'MAT · Modelo de Alerta Temprana' : 'CAMEL · Calificación por indicador';
+            const titulo = clave === 'mat' ? 'MAT · Variables del modelo' : 'CAMEL · Calificación por indicador';
             const subtitulo = document.getElementById(clave + '-tabla-sub').textContent;
-            const bloques = [{{ titulo: clave === 'mat' ? 'Variables del modelo' : 'Calificación por indicador', datos: _leerTablaDOM(document.getElementById(clave + '-tabla')) }}];
-            const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#B5452B');
-            const {{ html, texto }} = _htmlExcelBloques(titulo, subtitulo, bloques, '#B5452B');
-            abrirModalCopia({{ titulo, subtitulo, canvas, html, texto, archivo: (clave === 'mat' ? 'MAT_' : 'CAMEL_') + subtitulo.split(' · ')[0].replace(/ /g, '_') + '.png' }});
+            const clon = _tcClonar(document.getElementById(clave + '-tabla'), {{ tipo: 'fija' }}, new Set());
+            const ex = _tcExcel(titulo, subtitulo, [{{ titulo: '', tabla: clon }}]);
+            const img = await _tcImagen([{{ titulo: '', tabla: clon.cloneNode(true) }}]);
+            const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H);
+            L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
+            abrirModalCopia({{ titulo, subtitulo, canvas: L.cv, html: ex.html, texto: ex.texto,
+                              archivo: (clave === 'mat' ? 'MAT_' : 'CAMEL_') + subtitulo.split(' · ')[0].replace(/ /g, '_') + '.png' }});
         }}
 
         // ===== Resumen compacto para el análisis de solvencia =====
@@ -16400,12 +16409,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             if (document.fonts && document.fonts.ready) await document.fonts.ready;
             const titulo = 'Resumen para el Análisis de Solvencia';
             const subtitulo = document.getElementById('solv-resumen-sub').textContent;
-            const bloques = [
-                {{ titulo: 'Activos ponderados por riesgo por grupo', datos: _leerTablaDOM(document.getElementById('solv-resumen-apr')) }},
-                {{ titulo: 'Patrimonio técnico y solvencia', datos: _leerTablaDOM(document.getElementById('solv-resumen-pt')) }},
-            ];
-            const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#4E2D85');
-            const {{ html, texto }} = _htmlExcelBloques(titulo, subtitulo, bloques, '#4E2D85');
+            // Se copia la tabla tal como se ve en pantalla
+            const bloques = ['solv-resumen-apr', 'solv-resumen-pt'].map(id => {{
+                const t = document.getElementById(id);
+                return {{ titulo: _tcTituloTabla(t, t.closest('.section')), tabla: _tcClonar(t, {{ tipo: 'fija' }}, new Set()) }};
+            }});
+            const {{ html, texto }} = _tcExcel(titulo, subtitulo, bloques);
+            const img = await _tcImagen(bloques.map(b => ({{ titulo: b.titulo, tabla: b.tabla.cloneNode(true) }})));
+            const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H, '#4E2D85');
+            L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
+            const canvas = L.cv;
             abrirModalCopia({{ titulo, subtitulo, canvas, html, texto,
                 archivo: 'Resumen_Solvencia_' + subtitulo.split(' · ')[0].replace(/\\s+/g, '_') + '.png' }});
         }}
