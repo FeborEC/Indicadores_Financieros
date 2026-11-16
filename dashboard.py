@@ -2927,6 +2927,11 @@ def calcular_cartera_provision(df, periodos, todos_morosidad):
         mora = todos_morosidad[i] if todos_morosidad and i < len(todos_morosidad) else {}
         salida.append({"anio": anio, "mes": mes, "grupos": grupos, "provision_general": sum(pg.values()),
                        "cuentas_provision_general": pg, "indice_mora": mora.get("indice_mora")})
+    if salida:   # nombres de las cuentas (una sola vez) para el Excel rastreable
+        nombres = df.drop_duplicates("CUENTA", keep="last").set_index("CUENTA")["NOMBRE CUENTA"]
+        codigos = {c for cats in CARTERA_PROVISION.values() for x in cats.values() for c in x["cartera"] + x["provision"]}
+        codigos |= set(CUENTAS_PROVISION_GENERAL)
+        salida[0]["nombres"] = {c: _nombre_cuenta_legible(nombres[c]) if c in nombres.index else "" for c in sorted(codigos)}
     return salida
 
 
@@ -13809,7 +13814,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const txt = esPct ? `${{d >= 0 ? '+' : ''}}${{(d * 100).toFixed(2).replace('.', ',')}} pp` : `${{d >= 0 ? '+' : ''}}${{_cpM(d)}}`;
             return {{ txt: `${{fl}} ${{txt}}`, cls, d }};
         }}
-        const _cpVarPct = (a, b) => (b ? (a - b) / Math.abs(b) : null);
+        const _cpVarPct = (a, b, base) => {{ const d = base === undefined ? b : base; return d ? (a - b) / Math.abs(d) : null; }};
         function renderCarteraProvision() {{
             const A = DATOS_CARTERA_PROV[CP_STATE.idx], B = DATOS_CARTERA_PROV[CP_STATE.cmp];
             const ca = _cpCalc(A), cb = _cpCalc(B);
@@ -13907,98 +13912,151 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             document.getElementById('submenu-activo').classList.remove('oculto');
             window.scrollTo({{ top: 0, behavior: 'instant' }});
         }}
-        // Excel: comparativo con fórmulas, indicadores, cuentas de ambos períodos e histórico
+        // Excel rastreable: una hoja por mes con cada cuenta; el comparativo y el histórico toman sus cifras de esas hojas
+        function _cpHojaMes(wb, r, AC) {{
+            const nombres = (DATOS_CARTERA_PROV[0] && DATOS_CARTERA_PROV[0].nombres) || {{}};
+            const hoja = `${{(MESES_NOMBRE[r.mes] || r.mes).slice(0, 3)}}-${{r.anio}}`;
+            const ws = wb.addWorksheet(hoja, {{ views: [{{ state: 'frozen', ySplit: 4, showGridLines: false }}] }});
+            ws.columns = [{{ width: 12 }}, {{ width: 11 }}, {{ width: 13 }}, {{ width: 13 }}, {{ width: 50 }}, {{ width: 20 }}];
+            _xTitulo(ws, `Cartera y provisión · ${{_cpEtq(r)}}`, 'Saldos en pesos · cada total suma las cuentas de arriba', 6, AC);
+            _xEncabezado(ws, 4, ['Grupo', 'Categoría', 'Concepto', 'Cuenta', 'Nombre de la cuenta', 'Saldo'], AC);
+            let f = 5;
+            const ref = {{ cat: {{}}, hoja }};
+            const tot = (txt, formula, fmt, fuerte) => {{
+                const fill = fuerte ? COLOR.NARANJA_CLARO : COLOR.GRIS_CLARO;
+                ws.mergeCells(f, 1, f, 5);
+                _xCelda(ws, f, 1, txt, {{ bold: true, fill }});
+                _xCelda(ws, f, 6, formula, {{ bold: true, format: fmt || '#,##0.00', fill }});
+                return f++;
+            }};
+            const cuentas = (g, k, conc, obj) => {{
+                const f0 = f;
+                Object.entries(obj).forEach(([c, v]) => {{
+                    _xCelda(ws, f, 1, g, {{ size: 9 }}); _xCelda(ws, f, 2, k, {{ size: 9, align: 'center' }});
+                    _xCelda(ws, f, 3, conc, {{ size: 9 }}); _xCelda(ws, f, 4, c, {{ size: 9 }});
+                    _xCelda(ws, f, 5, nombres[c] || '', {{ size: 9 }}); _xCelda(ws, f, 6, v, {{ format: '#,##0.00' }});
+                    f++;
+                }});
+                return f > f0 ? {{ formula: `SUM(F${{f0}}:F${{f - 1}})` }} : 0;
+            }};
+            Object.keys(r.grupos).forEach(g => {{
+                ws.mergeCells(f, 1, f, 6); _xCelda(ws, f, 1, g, {{ bold: true, color: AC, fill: 'FFE6F2F0' }}); f++;
+                ref.cat[g] = {{}};
+                CP_CATS.forEach(k => {{
+                    const c = r.grupos[g][k];
+                    const fc = tot(`${{g}} ${{k}} · total cartera`, cuentas(g, k, 'Cartera', c.cuentas_cartera));
+                    const fp = tot(`${{g}} ${{k}} · total provisión`, cuentas(g, k, 'Provisión', c.cuentas_provision));
+                    tot(`${{g}} ${{k}} · cartera neta`, {{ formula: `F${{fc}}-F${{fp}}` }});
+                    ref.cat[g][k] = {{ c: fc, p: fp }};
+                }});
+            }});
+            f++;
+            ws.mergeCells(f, 1, f, 6); _xCelda(ws, f, 1, 'Resumen del mes', {{ bold: true, color: AC, fill: 'FFE6F2F0' }}); f++;
+            const todas = Object.values(ref.cat).flatMap(o => Object.values(o));
+            const riesgo = Object.values(ref.cat).flatMap(o => ['B', 'C', 'D', 'E'].map(k => o[k]));
+            ref.cartera = tot('Total cartera bruta', {{ formula: todas.map(x => `F${{x.c}}`).join('+') }});
+            ref.prov = tot('Total provisión individual', {{ formula: todas.map(x => `F${{x.p}}`).join('+') }});
+            ref.pg = tot('Provisión general', cuentas('General', '—', 'Provisión general', r.cuentas_provision_general));
+            ref.neta = tot('Total cartera neta = cartera − provisión individual − provisión general', {{ formula: `F${{ref.cartera}}-F${{ref.prov}}-F${{ref.pg}}` }}, null, true);
+            ref.riesgo = tot('Total cartera en riesgo (categorías B a E)', {{ formula: riesgo.map(x => `F${{x.c}}`).join('+') }});
+            ref.provTotal = tot('Provisión individual + provisión general', {{ formula: `F${{ref.prov}}+F${{ref.pg}}` }});
+            ref.calidad = tot('Índice de calidad de la cartera = cartera en riesgo ÷ cartera bruta', {{ formula: `IF(F${{ref.cartera}}=0,"",F${{ref.riesgo}}/F${{ref.cartera}})` }}, '0.00%', true);
+            ref.cubr = tot('Cubrimiento de cartera en riesgo = provisión total ÷ cartera en riesgo', {{ formula: `IF(F${{ref.riesgo}}=0,"",F${{ref.provTotal}}/F${{ref.riesgo}})` }}, '0.00%', true);
+            ref.mora = tot('Índice de la cartera en mora (calculado en el módulo Índice de Mora)', r.indice_mora, '0.00%');
+            ref.carMora = tot('Cartera en mora = índice de mora × cartera bruta', {{ formula: `F${{ref.mora}}*F${{ref.cartera}}` }});
+            ref.cubrMora = tot('Cubrimiento de cartera en mora = provisión total ÷ cartera en mora', {{ formula: `IF(F${{ref.carMora}}=0,"",F${{ref.provTotal}}/F${{ref.carMora}})` }}, '0.00%', true);
+            return ref;
+        }}
         async function descargarExcelCarteraProvision() {{
             const A = DATOS_CARTERA_PROV[CP_STATE.idx], B = DATOS_CARTERA_PROV[CP_STATE.cmp], AC = 'FF1E7F73';
             const eA = _cpEtq(A), eB = _cpEtq(B), MM = '#,##0.00;[Red]-#,##0.00', PC = '0.00%';
             const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            wb.calcProperties.fullCalcOnLoad = true;
             const ws = wb.addWorksheet('Comparativo', {{ views: [{{ state: 'frozen', ySplit: 5, showGridLines: false }}] }});
+            const wh = wb.addWorksheet('Histórico', {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+            // Hojas por mes (más reciente primero)
+            const refs = {{}};
+            [...DATOS_CARTERA_PROV.keys()].reverse().forEach(i => {{ refs[i] = _cpHojaMes(wb, DATOS_CARTERA_PROV[i], AC); }});
+            const rf = (i, celda) => `'${{refs[i].hoja}}'!F${{celda}}`;
+            const mill = (i, celda) => ({{ formula: `${{rf(i, celda)}}/1000000` }});
+            // ---- Comparativo ----
             ws.columns = [{{ width: 34 }}, ...Array(11).fill({{ width: 15 }})];
-            _xTitulo(ws, 'Cartera de créditos total (con pérdida esperada) · millones de pesos', `${{eA}} frente a ${{eB}}`, 12, AC);
+            _xTitulo(ws, 'Cartera de créditos total (con pérdida esperada) · millones de pesos',
+                     `${{eA}} frente a ${{eB}} · las cifras vienen de las hojas de cada mes`, 12, AC);
             ws.mergeCells(4, 2, 4, 5); ws.mergeCells(4, 6, 4, 8); ws.mergeCells(4, 9, 4, 12);
-            [[2, eA], [6, eB], [9, 'Variación']].forEach(([c, t]) => estilarCelda(Object.assign(ws.getCell(4, c), {{ value: t }}), {{ bold: true, color: COLOR.BLANCO, fill: AC, align: 'center' }}));
+            [[2, eA], [6, eB], [9, 'Variación']].forEach(([c, t]) => {{ const x = ws.getCell(4, c); x.value = t; estilarCelda(x, {{ bold: true, color: COLOR.BLANCO, fill: AC, align: 'center' }}); }});
             _xEncabezado(ws, 5, ['Categoría', 'Cartera', 'Provisión', 'Cartera neta', '% Provisión', 'Cartera', 'Provisión', 'Cartera neta', 'Cartera $', 'Cartera %', 'Provisión $', 'Provisión %'], AC);
             let f = 6;
             const filaX = (etq, ca_, pa_, cb_, pb_, opts) => {{
                 opts = opts || {{}};
-                const st = Object.assign({{}}, opts.fill ? {{ fill: opts.fill, bold: true }} : {{}});
+                const st = opts.fill ? {{ fill: opts.fill, bold: true }} : {{}};
+                const S = o => Object.assign({{}}, o, st);
                 _xCelda(ws, f, 1, etq, st);
-                _xCelda(ws, f, 2, ca_, Object.assign({{ format: MM }}, st)); _xCelda(ws, f, 3, pa_, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 4, {{ formula: `B${{f}}-C${{f}}` }}, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 5, {{ formula: `IF(B${{f}}=0,"",C${{f}}/B${{f}})` }}, Object.assign({{ format: PC }}, st));
-                _xCelda(ws, f, 6, cb_, Object.assign({{ format: MM }}, st)); _xCelda(ws, f, 7, pb_, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 8, {{ formula: `F${{f}}-G${{f}}` }}, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 9, {{ formula: `B${{f}}-F${{f}}` }}, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 10, {{ formula: `IF(F${{f}}=0,"",I${{f}}/F${{f}})` }}, Object.assign({{ format: PC }}, st));
-                _xCelda(ws, f, 11, {{ formula: `C${{f}}-G${{f}}` }}, Object.assign({{ format: MM }}, st));
-                _xCelda(ws, f, 12, {{ formula: `IF(G${{f}}=0,"",K${{f}}/G${{f}})` }}, Object.assign({{ format: PC }}, st));
+                _xCelda(ws, f, 2, ca_, S({{ format: MM }})); _xCelda(ws, f, 3, pa_, S({{ format: MM }}));
+                _xCelda(ws, f, 4, {{ formula: `B${{f}}-C${{f}}` }}, S({{ format: MM }}));
+                _xCelda(ws, f, 5, {{ formula: `IF(B${{f}}=0,"",C${{f}}/B${{f}})` }}, S({{ format: PC }}));
+                _xCelda(ws, f, 6, cb_, S({{ format: MM }})); _xCelda(ws, f, 7, pb_, S({{ format: MM }}));
+                _xCelda(ws, f, 8, {{ formula: `F${{f}}-G${{f}}` }}, S({{ format: MM }}));
+                _xCelda(ws, f, 9, {{ formula: `B${{f}}-F${{f}}` }}, S({{ format: MM }}));
+                _xCelda(ws, f, 10, {{ formula: `IF(F${{f}}=0,"",I${{f}}/F${{f}})` }}, S({{ format: PC }}));
+                _xCelda(ws, f, 11, {{ formula: `C${{f}}-G${{f}}` }}, S({{ format: MM }}));
+                _xCelda(ws, f, 12, {{ formula: `IF(G${{f}}=0,"",K${{f}}/G${{f}})` }}, S({{ format: PC }}));
                 return f++;
             }};
-            const subt = [];
+            const ia = CP_STATE.idx, ib = CP_STATE.cmp, subt = [];
             Object.keys(A.grupos).forEach(g => {{
                 ws.mergeCells(f, 1, f, 12); _xCelda(ws, f, 1, g, {{ bold: true, color: AC, fill: 'FFE6F2F0' }}); f++;
                 const f0 = f;
-                CP_CATS.forEach(k => filaX(`${{k}} · ${{CP_NOMBRE_CAT[k]}}`, A.grupos[g][k].cartera / 1e6, A.grupos[g][k].provision / 1e6, B.grupos[g][k].cartera / 1e6, B.grupos[g][k].provision / 1e6));
-                const s = f;
-                filaX(`Subtotal ${{g.toLowerCase()}}`, {{ formula: `SUM(B${{f0}}:B${{f - 1}})` }}, {{ formula: `SUM(C${{f0}}:C${{f - 1}})` }}, {{ formula: `SUM(F${{f0}}:F${{f - 1}})` }}, {{ formula: `SUM(G${{f0}}:G${{f - 1}})` }}, {{ fill: COLOR.GRIS_CLARO }});
-                subt.push(s);
+                CP_CATS.forEach(k => filaX(`${{k}} · ${{CP_NOMBRE_CAT[k]}}`, mill(ia, refs[ia].cat[g][k].c), mill(ia, refs[ia].cat[g][k].p),
+                                           mill(ib, refs[ib].cat[g][k].c), mill(ib, refs[ib].cat[g][k].p)));
+                subt.push(filaX(`Subtotal ${{g.toLowerCase()}}`, {{ formula: `SUM(B${{f0}}:B${{f - 1}})` }}, {{ formula: `SUM(C${{f0}}:C${{f - 1}})` }},
+                                {{ formula: `SUM(F${{f0}}:F${{f - 1}})` }}, {{ formula: `SUM(G${{f0}}:G${{f - 1}})` }}, {{ fill: COLOR.GRIS_CLARO }}));
             }});
             const sm = c => ({{ formula: subt.map(x => `${{c}}${{x}}`).join('+') }});
             const fT = filaX('Total cartera', sm('B'), sm('C'), sm('F'), sm('G'), {{ fill: COLOR.NARANJA_CLARO }});
             const fPg = f; _xCelda(ws, f, 1, '(−) Provisión general (cuenta 1468)', {{ bold: true }});
-            _xCelda(ws, f, 3, A.provision_general / 1e6, {{ format: MM }}); _xCelda(ws, f, 7, B.provision_general / 1e6, {{ format: MM }});
+            _xCelda(ws, f, 3, mill(ia, refs[ia].pg), {{ format: MM }}); _xCelda(ws, f, 7, mill(ib, refs[ib].pg), {{ format: MM }});
             _xCelda(ws, f, 11, {{ formula: `C${{f}}-G${{f}}` }}, {{ format: MM }}); _xCelda(ws, f, 12, {{ formula: `IF(G${{f}}=0,"",K${{f}}/G${{f}})` }}, {{ format: PC }}); f++;
-            const fN = f; _xCelda(ws, f, 1, 'Total cartera neta', {{ bold: true, fill: COLOR.NARANJA_CLARO }});
+            _xCelda(ws, f, 1, 'Total cartera neta', {{ bold: true, fill: COLOR.NARANJA_CLARO }});
             _xCelda(ws, f, 4, {{ formula: `D${{fT}}-C${{fPg}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
             _xCelda(ws, f, 8, {{ formula: `H${{fT}}-G${{fPg}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
             _xCelda(ws, f, 9, {{ formula: `D${{f}}-H${{f}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
             _xCelda(ws, f, 10, {{ formula: `IF(H${{f}}=0,"",I${{f}}/H${{f}})` }}, {{ bold: true, format: PC, fill: COLOR.NARANJA_CLARO }}); f += 2;
-            // Indicadores con fórmulas
             _xEncabezado(ws, f, ['Indicador', eA, eB, 'Variación'], AC); f++;
-            const riesgoF = col => subt.map(s => `SUM(${{col}}${{s - 4}}:${{col}}${{s - 1}})`).join('+');
-            const ind = (lbl, fa, fb, fmt, esPct) => {{
+            const ind = (lbl, campo, fmt, esPct) => {{
                 _xCelda(ws, f, 1, lbl, {{ bold: true }});
-                _xCelda(ws, f, 2, fa, {{ format: fmt }}); _xCelda(ws, f, 3, fb, {{ format: fmt }});
+                const val = i => esPct ? {{ formula: rf(i, refs[i][campo]) }} : mill(i, refs[i][campo]);
+                _xCelda(ws, f, 2, val(ia), {{ format: fmt }}); _xCelda(ws, f, 3, val(ib), {{ format: fmt }});
                 _xCelda(ws, f, 4, {{ formula: `IF(OR(B${{f}}="",C${{f}}=""),"",B${{f}}-C${{f}})` }}, {{ format: esPct ? '+0.00%;-0.00%' : MM }});
-                return f++;
+                f++;
             }};
-            const fR = ind('Total cartera en riesgo (B a E)', {{ formula: riesgoF('B') }}, {{ formula: riesgoF('F') }}, MM);
-            const fP = ind('Provisión individual + general', {{ formula: `C${{fT}}+C${{fPg}}` }}, {{ formula: `G${{fT}}+G${{fPg}}` }}, MM);
-            ind('Índice de calidad de la cartera', {{ formula: `IF(B${{fT}}=0,"",B${{fR}}/B${{fT}})` }}, {{ formula: `IF(F${{fT}}=0,"",C${{fR}}/F${{fT}})` }}, PC, true);
-            ind('Cubrimiento de cartera en riesgo', {{ formula: `IF(B${{fR}}=0,"",B${{fP}}/B${{fR}})` }}, {{ formula: `IF(C${{fR}}=0,"",C${{fP}}/C${{fR}})` }}, PC, true);
-            const fM = ind('Índice de la cartera en mora (módulo Índice de Mora)', A.indice_mora, B.indice_mora, PC, true);
-            ind('Cubrimiento de cartera en mora', {{ formula: `IF(B${{fM}}*B${{fT}}=0,"",B${{fP}}/(B${{fM}}*B${{fT}}))` }}, {{ formula: `IF(C${{fM}}*F${{fT}}=0,"",C${{fP}}/(C${{fM}}*F${{fT}}))` }}, PC, true);
-            // Cuentas de los dos períodos
-            const wc = wb.addWorksheet('Cuentas', {{ views: [{{ state: 'frozen', ySplit: 4, showGridLines: false }}] }});
-            wc.columns = [{{ width: 12 }}, {{ width: 8 }}, {{ width: 14 }}, {{ width: 14 }}, {{ width: 18 }}, {{ width: 18 }}, {{ width: 18 }}];
-            _xTitulo(wc, 'Cuentas contables de cada categoría (pesos)', `${{eA}} y ${{eB}}`, 7, AC);
-            _xEncabezado(wc, 4, ['Grupo', 'Categoría', 'Concepto', 'Cuenta', eA, eB, 'Variación'], AC);
-            let fc = 5;
-            const filaC = (g, k, conc, cod, va, vb) => {{
-                _xCelda(wc, fc, 1, g); _xCelda(wc, fc, 2, k, {{ align: 'center' }}); _xCelda(wc, fc, 3, conc); _xCelda(wc, fc, 4, cod);
-                _xCelda(wc, fc, 5, va, {{ format: '#,##0.00' }}); _xCelda(wc, fc, 6, vb, {{ format: '#,##0.00' }});
-                _xCelda(wc, fc, 7, {{ formula: `E${{fc}}-F${{fc}}` }}, {{ format: '#,##0.00;[Red]-#,##0.00' }}); fc++;
-            }};
-            Object.keys(A.grupos).forEach(g => CP_CATS.forEach(k => {{
-                Object.keys(A.grupos[g][k].cuentas_cartera).forEach(c => filaC(g, k, 'Cartera', c, A.grupos[g][k].cuentas_cartera[c], B.grupos[g][k].cuentas_cartera[c]));
-                Object.keys(A.grupos[g][k].cuentas_provision).forEach(c => filaC(g, k, 'Provisión', c, A.grupos[g][k].cuentas_provision[c], B.grupos[g][k].cuentas_provision[c]));
-            }}));
-            Object.keys(A.cuentas_provision_general).forEach(c => filaC('General', '—', 'Provisión general', c, A.cuentas_provision_general[c], B.cuentas_provision_general[c]));
-            // Histórico mensual
-            const wh = wb.addWorksheet('Histórico', {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+            ind('Total cartera en riesgo (B a E)', 'riesgo', MM);
+            ind('Provisión individual + general', 'provTotal', MM);
+            ind('Índice de calidad de la cartera', 'calidad', PC, true);
+            ind('Cubrimiento de cartera en riesgo', 'cubr', PC, true);
+            ind('Índice de la cartera en mora', 'mora', PC, true);
+            ind('Cubrimiento de cartera en mora', 'cubrMora', PC, true);
+            // ---- Histórico (fórmulas a las hojas de cada mes) ----
             const cab = ['Período'];
             Object.keys(A.grupos).forEach(g => CP_CATS.forEach(k => cab.push(`${{g}} ${{k}} cartera`, `${{g}} ${{k}} provisión`)));
-            cab.push('Total cartera', 'Provisión individual', 'Provisión general', 'Cartera neta', 'Cartera en riesgo', 'Índice de calidad', 'Cubrimiento', 'Índice de mora', 'Cubrimiento mora');
+            const campos = [['cartera', 'Total cartera'], ['prov', 'Provisión individual'], ['pg', 'Provisión general'], ['neta', 'Cartera neta'],
+                            ['riesgo', 'Cartera en riesgo'], ['calidad', 'Índice de calidad'], ['cubr', 'Cubrimiento'], ['mora', 'Índice de mora'], ['cubrMora', 'Cubrimiento mora']];
+            campos.forEach(c => cab.push(c[1]));
             wh.columns = cab.map((_, j) => ({{ width: j ? 14 : 18 }}));
-            _xTitulo(wh, 'Cartera y provisión · histórico mensual (millones de pesos)', 'Valores de cada mes', cab.length, AC);
+            _xTitulo(wh, 'Cartera y provisión · histórico mensual (millones de pesos)', 'Cada cifra viene de la hoja del mes', cab.length, AC);
             _xEncabezado(wh, 4, cab, AC);
             DATOS_CARTERA_PROV.forEach((r, i) => {{
-                const c = _cpCalc(r), fi = 5 + i;
-                const vals = [_cpEtq(r)];
-                Object.keys(r.grupos).forEach(g => CP_CATS.forEach(k => vals.push(r.grupos[g][k].cartera / 1e6, r.grupos[g][k].provision / 1e6)));
-                vals.push(c.cartera / 1e6, c.provision / 1e6, c.pg / 1e6, c.neta / 1e6, c.riesgo / 1e6, c.calidad, c.cubrimiento, c.mora, c.cubrMora);
-                vals.forEach((v, j) => _xCelda(wh, fi, j + 1, v, {{ format: j >= vals.length - 4 ? PC : (j ? MM : undefined),
-                                                                   fill: i === CP_STATE.idx || i === CP_STATE.cmp ? COLOR.NARANJA_CLARO : undefined }}));
+                const fi = 5 + i, sel = i === ia || i === ib ? COLOR.NARANJA_CLARO : undefined;
+                let j = 1;
+                _xCelda(wh, fi, j++, _cpEtq(r), {{ fill: sel }});
+                Object.keys(r.grupos).forEach(g => CP_CATS.forEach(k => {{
+                    _xCelda(wh, fi, j++, mill(i, refs[i].cat[g][k].c), {{ format: MM, fill: sel }});
+                    _xCelda(wh, fi, j++, mill(i, refs[i].cat[g][k].p), {{ format: MM, fill: sel }});
+                }}));
+                campos.forEach(([c]) => {{
+                    const pct = ['calidad', 'cubr', 'mora', 'cubrMora'].includes(c);
+                    _xCelda(wh, fi, j++, pct ? {{ formula: rf(i, refs[i][c]) }} : mill(i, refs[i][c]), {{ format: pct ? PC : MM, fill: sel }});
+                }});
             }});
             await _xGuardar(wb, `Cartera_y_Provision_${{eA.replace(/ /g, '_')}}_vs_${{eB.replace(/ /g, '_')}}.xlsx`);
         }}
