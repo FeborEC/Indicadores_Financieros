@@ -2784,6 +2784,11 @@ PARAMETROS_POR_DEFECTO = {
         "anchos": [10, 28, 12, 70],
         "filas": [[1, "MINIMO_LEGAL_SOLVENCIA", 0.09, "Relación de solvencia mínima legal (rangos 'x mínimo legal')"]],
     },
+    "Velocimetros": {
+        "columnas": ["Version", "Velocímetro", "Indicador", "Desde (%)", "Hasta (%)", "Nivel", "Color", "Etiqueta"],
+        "anchos": [10, 20, 36, 12, 12, 18, 12, 12],
+        "filas": [[1, 'solvencia', 'Índice de solvencia', 0, 9, 'Bajo el mínimo', '#C91A15', ''], [1, 'solvencia', 'Índice de solvencia', 9, 15, 'Advertencia', '#FBDA03', 'MÍN'], [1, 'solvencia', 'Índice de solvencia', 15, 25, 'Bien', '#26D354', ''], [1, 'solvencia', 'Índice de solvencia', 25, 35, 'Óptimo', '#17A53D', ''], [1, 'mora', 'Índice de mora', 0, 3, 'Bajo', '#17A53D', ''], [1, 'mora', 'Índice de mora', 3, 6, 'Aceptable', '#FBDA03', ''], [1, 'mora', 'Índice de mora', 6, 9, 'Alerta', '#F78502', ''], [1, 'mora', 'Índice de mora', 9, 12, 'Crítico', '#C91A15', ''], [1, 'riesgo', 'Calidad de cartera (índice de riesgo)', 0, 5, 'Excelente', '#17A53D', ''], [1, 'riesgo', 'Calidad de cartera (índice de riesgo)', 5, 10, 'Aceptable', '#FBDA03', ''], [1, 'riesgo', 'Calidad de cartera (índice de riesgo)', 10, 15, 'Alerta', '#F78502', ''], [1, 'riesgo', 'Calidad de cartera (índice de riesgo)', 15, 20, 'Crítico', '#C91A15', ''], [1, 'cobertura', 'Cobertura de cartera', 0, 25, 'Insuficiente', '#C91A15', ''], [1, 'cobertura', 'Cobertura de cartera', 25, 50, 'Bajo', '#F78502', ''], [1, 'cobertura', 'Cobertura de cartera', 50, 75, 'Aceptable', '#FBDA03', ''], [1, 'cobertura', 'Cobertura de cartera', 75, 100, 'Sólido', '#17A53D', ''], [1, 'cartera_activo', 'Cartera sobre activo', 0, 20, 'Muy bajo', '#C91A15', ''], [1, 'cartera_activo', 'Cartera sobre activo', 20, 40, 'Bajo', '#F77F00', ''], [1, 'cartera_activo', 'Cartera sobre activo', 40, 60, 'Medio', '#FBDA03', ''], [1, 'cartera_activo', 'Cartera sobre activo', 60, 80, 'Alto', '#5FD97E', ''], [1, 'cartera_activo', 'Cartera sobre activo', 80, 100, 'Muy alto', '#17A53D', ''], [1, 'depositos_pasivo', 'Depósitos sobre pasivo', 0, 20, 'Muy bajo', '#C91A15', ''], [1, 'depositos_pasivo', 'Depósitos sobre pasivo', 20, 40, 'Bajo', '#F77F00', ''], [1, 'depositos_pasivo', 'Depósitos sobre pasivo', 40, 60, 'Medio', '#FBDA03', ''], [1, 'depositos_pasivo', 'Depósitos sobre pasivo', 60, 80, 'Alto', '#5FD97E', ''], [1, 'depositos_pasivo', 'Depósitos sobre pasivo', 80, 100, 'Muy alto', '#17A53D', ''], [1, 'depositos_cartera', 'Depósitos sobre cartera', 0, 20, 'Muy bajo', '#C91A15', ''], [1, 'depositos_cartera', 'Depósitos sobre cartera', 20, 40, 'Bajo', '#F77F00', ''], [1, 'depositos_cartera', 'Depósitos sobre cartera', 40, 60, 'Medio', '#FBDA03', ''], [1, 'depositos_cartera', 'Depósitos sobre cartera', 60, 80, 'Alto', '#5FD97E', ''], [1, 'depositos_cartera', 'Depósitos sobre cartera', 80, 100, 'Muy alto', '#17A53D', '']],
+    },
     "EBITDA_Niveles": {
         "columnas": ["Version", "Quintil", "Nivel", "Color"],
         "anchos": [10, 10, 16, 12],
@@ -14306,16 +14311,26 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             let s = `<defs><radialGradient id="${{svgId}}-cara" cx="50%" cy="45%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#eef1f4"/></radialGradient>
                      <linearGradient id="${{svgId}}-aguja" x1="0" x2="1"><stop offset="0%" stop-color="#2b3a55"/><stop offset="100%" stop-color="#0f172a"/></linearGradient></defs>`;
             s += `<circle cx="${{cx}}" cy="${{cy}}" r="138" fill="url(#${{svgId}}-cara)" stroke="#dfe3e8" stroke-width="3"/>`;
-            const seg = rango / 60;
-            for (let k = 0; k < 60; k++) {{
-                const v = EB_MIN + k * seg, n = _nivelDe(niveles, v + seg / 2);
-                s += `<path d="${{arco(v, v + seg, R)}}" stroke="${{n ? n.color : '#cbd5e1'}}" stroke-width="20" fill="none"/>`;
-            }}
+            // Bandas continuas: un arco por nivel (quintil), con una separación fina en cada límite
+            const arcoG = (v1, v2, r) => {{ const [x1, y1] = pt(v1, r), [x2, y2] = pt(v2, r);
+                const grande = (pos(v2) - pos(v1)) * BARRIDO > 180 ? 1 : 0;
+                return `M ${{x1.toFixed(2)}} ${{y1.toFixed(2)}} A ${{r}} ${{r}} 0 ${{grande}} 1 ${{x2.toFixed(2)}} ${{y2.toFixed(2)}}`; }};
+            (niveles || []).forEach(nv => {{
+                const a = Math.max(EB_MIN, nv.desde === null ? EB_MIN : nv.desde), b = Math.min(EB_MAX, nv.hasta === null ? EB_MAX : nv.hasta);
+                if (b <= a) return;
+                s += `<path d="${{arcoG(a, b, R)}}" stroke="${{nv.color}}" stroke-width="20" fill="none"/>`;
+            }});
+            (niveles || []).forEach(nv => {{
+                if (nv.desde === null || nv.desde <= EB_MIN || nv.desde >= EB_MAX) return;
+                const [x1, y1] = pt(nv.desde, R - 11), [x2, y2] = pt(nv.desde, R + 11);
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="2"/>`;
+            }});
+            // Marcas discretas por dentro de la banda y números
             for (let v = Math.ceil(EB_MIN / (paso / 2)) * (paso / 2); v <= EB_MAX + 1e-9; v += paso / 2) {{
                 const mayor = Math.abs(v / paso - Math.round(v / paso)) < 1e-9;
-                const [x1, y1] = pt(v, R - 10), [x2, y2] = pt(v, R + 10);
-                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="${{mayor ? 3 : 0.8}}"/>`;
-                if (mayor) {{ const [tx, ty] = pt(v, R - 30);
+                const [x1, y1] = pt(v, R - 13), [x2, y2] = pt(v, R - (mayor ? 20 : 17));
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#94a3b8" stroke-width="${{mayor ? 1.6 : 1}}" stroke-linecap="round"/>`;
+                if (mayor) {{ const [tx, ty] = pt(v, R - 32);
                     s += `<text x="${{tx.toFixed(1)}}" y="${{ty.toFixed(1)}}" text-anchor="middle" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#475569" font-family="Poppins, sans-serif">${{v}}%</text>`; }}
             }}
             if (pct !== null) {{
@@ -14813,6 +14828,79 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
             window.addEventListener('scroll', marcar, {{ passive: true }});
             window.addEventListener('resize', marcar);
+        }})();
+
+        // ===== VELOCÍMETROS PARAMETRIZABLES (hoja «Velocimetros» de parametros.xlsx) =====
+        // Cada tramo: desde, hasta, nivel, color y etiqueta opcional; se usa la versión más reciente de la hoja.
+        function _tramosVel(clave) {{
+            const filas = (PARAMETROS_MC.Velocimetros || []).filter(f => String(f['Velocímetro']).trim() === clave);
+            if (!filas.length) return null;
+            const v = Math.max(...filas.map(f => +f.Version || 1));
+            return filas.filter(f => (+f.Version || 1) === v)
+                .map(f => ({{ desde: +f['Desde (%)'], hasta: +f['Hasta (%)'], nivel: f.Nivel || '', color: f.Color || '#94a3b8', etiqueta: f.Etiqueta || '' }}))
+                .filter(t => isFinite(t.desde) && isFinite(t.hasta)).sort((a, b) => a.desde - b.desde);
+        }}
+        const _pctVel = v => (Math.round(v * 100) / 100).toFixed(2).replace('.', ',') + '%';
+        // Color del número central y de la etiqueta: el mismo que ya usaba cada velocímetro (los claros se oscurecen para leerse)
+        const VEL_TEXTO = {{ '#FBDA03': '#E2C403', '#5FD97E': '#3DAE5C' }};
+        const _oscuroVel = (hex, f) => {{ const n = parseInt(hex.slice(1), 16);
+            const c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(x * f).toString(16).padStart(2, '0'));
+            return '#' + c.join(''); }};
+        function _aplicarVelocimetro(clave, needleId, textId, pct, badgeId) {{
+            const tr = _tramosVel(clave);
+            const needle = document.getElementById(needleId);
+            if (!tr || !tr.length || !needle) return;
+            const svg = needle.ownerSVGElement, NS = 'http://www.w3.org/2000/svg';
+            const min = tr[0].desde, max = tr[tr.length - 1].hasta;
+            const t = v => Math.max(0, Math.min(1, (v - min) / ((max - min) || 1)));
+            const pt = (v, r) => {{ const a = Math.PI - t(v) * Math.PI; return [100 + r * Math.cos(a), 100 - r * Math.sin(a)]; }};
+            if (svg.dataset.velClave !== clave + JSON.stringify(tr)) {{
+                svg.querySelectorAll('.gauge-arc-zone').forEach(e => e.remove());
+                [...svg.querySelectorAll('.gauge-tick-chip')].forEach(e => e.parentNode.remove());
+                tr.forEach(z => {{
+                    const [x1, y1] = pt(z.desde, 70), [x2, y2] = pt(z.hasta, 70);
+                    const p = document.createElementNS(NS, 'path');
+                    p.setAttribute('class', 'gauge-arc-zone'); p.setAttribute('d', `M ${{x1.toFixed(2)}} ${{y1.toFixed(2)}} A 70 70 0 0 1 ${{x2.toFixed(2)}} ${{y2.toFixed(2)}}`);
+                    p.style.stroke = z.color;
+                    svg.insertBefore(p, needle);
+                }});
+                const marcas = [...tr.map(z => [z.desde, z.etiqueta]), [max, '']];
+                marcas.forEach(([v, etq]) => {{
+                    const [x, y] = pt(v, 88), txt = _pctVel(v) + (etq ? ' ' + etq : ''), w = txt.length * 5.4 + 8;
+                    const g = document.createElementNS(NS, 'g');
+                    g.innerHTML = `<rect class="gauge-tick-chip" x="${{(x - w / 2).toFixed(1)}}" y="${{(y - 7.5).toFixed(1)}}" width="${{w.toFixed(1)}}" height="15" rx="5"/>`
+                                + `<text class="gauge-tick-label" x="${{x.toFixed(1)}}" y="${{(y + 3).toFixed(1)}}" text-anchor="middle">${{txt}}</text>`;
+                    svg.insertBefore(g, needle);
+                }});
+                svg.dataset.velClave = clave + JSON.stringify(tr);
+            }}
+            if (pct === null || pct === undefined || isNaN(pct)) return;
+            needle.style.transform = `rotate(${{-90 + t(pct) * 180}}deg)`;
+            const z = tr.find(x => pct >= x.desde && pct < x.hasta) || (pct < min ? tr[0] : tr[tr.length - 1]);
+            const txt = document.getElementById(textId);
+            const colTxt = VEL_TEXTO[String(z.color).toUpperCase()] || z.color;
+            if (txt) txt.style.fill = colTxt;
+            if (badgeId) setTimeout(() => {{
+                const b = document.getElementById(badgeId);
+                if (!b || !z.nivel) return;
+                b.textContent = z.nivel;
+                const fuerte = _oscuroVel(colTxt, 0.75);
+                b.style.cssText = `background:${{z.color}}1F;color:${{fuerte}};border:1px solid ${{fuerte}}40;padding:7px 16px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;`;
+            }}, 0);
+        }}
+        // Se conecta a las funciones que ya actualizan cada velocímetro
+        (function () {{
+            const envolver = (nombre, despues) => {{
+                const orig = window[nombre];
+                if (typeof orig !== 'function') return;
+                window[nombre] = function (...a) {{ const res = orig.apply(this, a); try {{ despues(...a); }} catch (e) {{ console.error(e); }} return res; }};
+            }};
+            envolver('actualizarGauge', r => _aplicarVelocimetro('solvencia', 'gauge-needle-group', 'gauge-text', r.solvencia * 100));
+            envolver('actualizarGaugeMora', r => _aplicarVelocimetro('mora', 'mora-gauge-needle-group', 'mora-gauge-text', r.indice_mora * 100, 'mora-estado-badge'));
+            envolver('actualizarGaugeRiesgo', r => _aplicarVelocimetro('riesgo', 'riesgo-gauge-needle-group', 'riesgo-gauge-text', r.calidad_cartera * 100, 'riesgo-estado-badge'));
+            envolver('actualizarGaugeCobertura', r => _aplicarVelocimetro('cobertura', 'cobertura-gauge-needle-group', 'cobertura-gauge-text', obtenerCoberturaActiva(r) * 100, 'cobertura-estado-badge'));
+            const claves100 = {{ 'cartera-activo-gauge': 'cartera_activo', 'depositos-pasivo-gauge': 'depositos_pasivo', 'depositos-cartera-gauge': 'depositos_cartera' }};
+            envolver('_actualizarGauge100', (prefijo, pct) => {{ if (claves100[prefijo]) _aplicarVelocimetro(claves100[prefijo], prefijo + '-needle-group', prefijo + '-text', pct); }});
         }})();
         // ===== ANIMACIÓN GLOBAL PARA TODOS LOS GRÁFICOS =====
         // Transición suave consistente en todo el modelo: al crear o actualizar cualquier
@@ -21659,7 +21747,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const anchoTotal = Math.max(n * 46, 700);
             CSEG_SCROLL_IDS.forEach(o => {{
                 const inner = document.getElementById(o.inner);
-                if (inner) inner.style.width = anchoTotal + 'px';
+                if (!inner) return;
+                if (o.inner === 'csegTotal-inner') {{   // gráfico principal: el último año a la vista
+                    const sc = document.getElementById(o.scroll);
+                    const visible = (sc && sc.clientWidth > 100) ? sc.clientWidth : 900;
+                    inner.style.width = Math.max(visible, n * visible / 12) + 'px';
+                }} else inner.style.width = anchoTotal + 'px';
             }});
         }}
         function scrollAlPeriodoCSeg(idx) {{
