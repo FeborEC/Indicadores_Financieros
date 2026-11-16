@@ -8929,6 +8929,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             /* En los mini-gráficos de segmento la etiqueta es más compacta */
             .dep-mini-card.cseg-chart-box {{ padding-top: 0; }}
             .dep-mini-card.cseg-chart-box .cseg-chart-tag {{ top: 2px; right: 8px; }}
+            /* Las etiquetas van en su propio renglón (arriba a la derecha) para no tapar los valores del gráfico */
+            .dep-chart-tag, .cseg-chart-tag,
+            .dep-mini-card.cseg-chart-box .cseg-chart-tag {{
+                position: static; width: max-content; max-width: 100%; margin: 0 0 8px auto;
+            }}
+            .cseg-chart-box {{ padding-top: 0; }}
             .historico-eje-fijo {{
                 flex: 0 0 96px;
                 width: 96px;
