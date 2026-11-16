@@ -15856,7 +15856,13 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             L.g.drawImage(img, L.x + (W - vb.width * 1.6) / 2, L.y, vb.width * 1.6, H);
             const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;';
             const html = `<table style="border-collapse:collapse;"><tr><td style="${{base}}font-weight:bold;">${{titulo}}</td></tr><tr><td style="${{base}}">${{subtitulo}}</td></tr></table>`;
-            abrirModalCopia({{ titulo, subtitulo, canvas: L.cv, html, texto: `${{titulo}}\\n${{subtitulo}}`, archivo: `${{clave.toUpperCase()}}_${{_etqMC(r)}}.png` }});
+            // Copia directa al portapapeles (sin ventana); si el navegador no lo permite, descarga el PNG
+            const btn = document.querySelector(`[onclick="copiarInstrumentoMC('${{clave}}')"]`);
+            const sp = btn && btn.querySelector('span'), t0 = sp ? sp.textContent : '';
+            const aviso = m => {{ if (sp) {{ sp.textContent = m; setTimeout(() => sp.textContent = t0, 1800); }} }};
+            const blob = await new Promise(res => L.cv.toBlob(res, 'image/png'));
+            try {{ await navigator.clipboard.write([new ClipboardItem({{ 'image/png': blob }})]); aviso('Copiada ✓'); }}
+            catch (e) {{ saveAs(blob, `${{clave.toUpperCase()}}_${{_etqMC(r)}}.png`); aviso('Descargada ✓'); }}
         }}
 
 
