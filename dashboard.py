@@ -5841,9 +5841,16 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .mc-lupa {{
                 display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 6px; padding: 0;
                 border: 1.5px solid #f5d2bd; border-radius: 50%; background: #fff7f1; color: #B5452B; cursor: pointer;
-                vertical-align: middle; transition: transform .15s, background .15s;
+                vertical-align: middle; transition: transform .15s, background .15s, box-shadow .15s;
+                animation: lupaPulso 3.2s ease-in-out infinite;
             }}
-            .mc-lupa:hover {{ background: #B5452B; color: #ffffff; transform: scale(1.12); }}
+            .mc-lupa:hover {{ background: #B5452B; color: #ffffff; transform: scale(1.12); box-shadow: 0 3px 10px rgba(181, 69, 43, .35); animation: none; }}
+            /* Pulso suave para indicar que la lupa se puede abrir */
+            @keyframes lupaPulso {{
+                0%, 70%, 100% {{ box-shadow: 0 0 0 0 rgba(181, 69, 43, 0); }}
+                35% {{ box-shadow: 0 0 0 4px rgba(181, 69, 43, .18); }}
+            }}
+            @media (prefers-reduced-motion: reduce) {{ .mc-lupa {{ animation: none; }} }}
             .mc-lupa svg {{ width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }}
             .mc-modal-caja {{ width: min(1080px, 100%); }}
             .mc-modal-graf {{ position: relative; height: 340px; }}
@@ -14507,8 +14514,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 borderColor: DATOS_EBITDA.map((_, k) => k === i0 ? '#1f2937' : 'transparent'), borderWidth: DATOS_EBITDA.map((_, k) => k === i0 ? 1.5 : 0),
                 borderRadius: 5, borderSkipped: false, maxBarThickness: 44, categoryPercentage: 0.72, barPercentage: 0.86,
                 datalabels: {{ display: true, anchor: 'end', align: 'end', offset: 4, clamp: false, clip: false,
-                               color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0f5132' : (neg === '#D6403A' ? '#B42318' : '#B45309'),
-                               font: c => ({{ size: c.dataIndex === i0 ? 12 : 11, weight: conEtiqueta ? '800' : '700' }}),
+                               color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0b3d20' : (neg === '#D6403A' ? '#9f1c12' : '#9a4a05'),
+                               font: c => ({{ size: c.dataIndex === i0 ? 14.5 : 13, weight: '800' }}),
                                formatter: v => v.toLocaleString('es-CO', {{ maximumFractionDigits: 0 }}) }}
             }});
             EB_STATE.hist = new Chart(document.getElementById('chartEBComp'), {{
@@ -15438,24 +15445,29 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 return `M ${{x1.toFixed(2)}} ${{y1.toFixed(2)}} A ${{r}} ${{r}} 0 ${{grande}} 1 ${{x2.toFixed(2)}} ${{y2.toFixed(2)}}`;
             }};
             let s = `<defs><radialGradient id="${{svgId}}-cara" cx="50%" cy="45%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#eef1f4"/></radialGradient>
-                     <linearGradient id="${{svgId}}-aguja" x1="0" x2="1"><stop offset="0%" stop-color="#ff5a4e"/><stop offset="100%" stop-color="#b3120a"/></linearGradient></defs>`;
+                     <linearGradient id="${{svgId}}-aguja" x1="0" x2="1"><stop offset="0%" stop-color="#2b3a55"/><stop offset="100%" stop-color="#0f172a"/></linearGradient></defs>`;
             s += `<circle cx="${{cx}}" cy="${{cy}}" r="138" fill="url(#${{svgId}}-cara)" stroke="#dfe3e8" stroke-width="3"/>`;
-            // Bandas de color: segmentos pequeños con el color de su nivel (MAT_Niveles)
-            for (let v = 0; v < 100; v += 2) {{
-                const n = _nivelDe(niveles, v + 1);
-                s += `<path d="${{arco(v, v + 2, R)}}" stroke="${{n ? n.color : '#cbd5e1'}}" stroke-width="20" fill="none"/>`;
-            }}
-            // Marcas (mayores cada 10) y números
-            for (let v = 0; v <= 100; v += 2) {{
+            // Bandas continuas: un arco por nivel (hoja MAT_Niveles), con una separación fina en cada límite
+            (niveles || []).forEach(nv => {{
+                const a = Math.max(0, nv.desde === null ? 0 : nv.desde), b = Math.min(100, nv.hasta === null ? 100 : nv.hasta);
+                if (b > a) s += `<path d="${{arco(a, b, R)}}" stroke="${{nv.color}}" stroke-width="20" fill="none"/>`;
+            }});
+            (niveles || []).forEach(nv => {{
+                if (nv.desde === null || nv.desde <= 0 || nv.desde >= 100) return;
+                const [x1, y1] = pt(nv.desde, R - 11), [x2, y2] = pt(nv.desde, R + 11);
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="2"/>`;
+            }});
+            // Marcas discretas por dentro de la banda y números
+            for (let v = 0; v <= 100; v += 5) {{
                 const mayor = v % 10 === 0;
-                const [x1, y1] = pt(v, R - 10), [x2, y2] = pt(v, R + 10);
-                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="${{mayor ? 3 : 0.8}}"/>`;
+                const [x1, y1] = pt(v, R - 13), [x2, y2] = pt(v, R - (mayor ? 20 : 17));
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#94a3b8" stroke-width="${{mayor ? 1.6 : 1}}" stroke-linecap="round"/>`;
                 if (mayor) {{
-                    const [tx, ty] = pt(v, R - 30);
+                    const [tx, ty] = pt(v, R - 32);
                     s += `<text x="${{tx.toFixed(1)}}" y="${{ty.toFixed(1)}}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="600" fill="#475569" font-family="Poppins, sans-serif">${{v}}</text>`;
                 }}
             }}
-            // Aguja
+            // Aguja oscura
             if (valor !== null && valor !== undefined) {{
                 const a = ang(valor);
                 const [px, py] = pt(valor, R - 8);
@@ -15463,12 +15475,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const bx2 = cx + 7 * Math.cos(a - Math.PI / 2), by2 = cy + 7 * Math.sin(a - Math.PI / 2);
                 s += `<polygon points="${{bx1.toFixed(1)}},${{by1.toFixed(1)}} ${{px.toFixed(1)}},${{py.toFixed(1)}} ${{bx2.toFixed(1)}},${{by2.toFixed(1)}}" fill="url(#${{svgId}}-aguja)" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.25))"/>`;
             }}
-            s += `<circle cx="${{cx}}" cy="${{cy}}" r="16" fill="#d0160b"/><circle cx="${{cx - 4}}" cy="${{cy - 5}}" r="5" fill="#ff8a80" opacity="0.7"/>`;
+            s += `<circle cx="${{cx}}" cy="${{cy}}" r="16" fill="#1f2937"/><circle cx="${{cx - 4}}" cy="${{cy - 5}}" r="5" fill="#94a3b8" opacity="0.6"/>`;
             s += `<text x="${{cx}}" y="${{cy + 30}}" text-anchor="middle" font-size="13" fill="#64748b" font-family="Poppins, sans-serif" font-weight="600">MAT</text>`;
-            // Pantalla digital y nivel
+            // Pantalla clara y nivel
             const n = _nivelDe(niveles, valor);
-            s += `<rect x="${{cx - 55}}" y="${{cy + 40}}" width="110" height="32" rx="6" fill="#111827"/>
-                  <text x="${{cx}}" y="${{cy + 62}}" text-anchor="middle" font-size="20" font-weight="700" fill="#f8fafc" font-family="'JetBrains Mono', monospace">${{_fmt2(valor)}}</text>`;
+            s += `<rect x="${{cx - 55}}" y="${{cy + 40}}" width="110" height="32" rx="9" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+                  <text x="${{cx}}" y="${{cy + 62}}" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937" font-family="Poppins, sans-serif">${{_fmt2(valor)}}</text>`;
             s += `<rect x="${{cx - 46}}" y="${{cy + 78}}" width="92" height="22" rx="11" fill="${{n ? n.color : '#64748b'}}"/>
                   <text x="${{cx}}" y="${{cy + 93}}" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" font-family="Poppins, sans-serif">${{n ? n.nivel : '—'}}</text>`;
             document.getElementById(svgId).innerHTML = s;
