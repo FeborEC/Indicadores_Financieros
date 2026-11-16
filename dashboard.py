@@ -11698,9 +11698,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 <div class="solv-resumen-wrap"><table class="solv-resumen-tabla mc-tabla-ancha" id="camel-tabla"></table></div>
             </div>
             <div class="section mc-blanco">
-                <h2 class="section-title">Puntajes de los Últimos 13 Meses</h2>
-                <p class="seccion-subtitulo">1 = mejor · 5 = peor · el color sigue los niveles definidos en parametros.xlsx</p>
-                <div class="solv-resumen-wrap"><table class="solv-resumen-tabla mc-hist" id="camel-hist"></table></div>
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Puntajes por Mes</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarPuntajesCAMEL()" title="Copiar la tabla"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                </div>
+                <p class="seccion-subtitulo">1 = mejor · 5 = peor · el color sigue los niveles definidos en parametros.xlsx · desplázate con la barra inferior</p>
+                <div class="mc-graf-scroll mc-tablero-wrap" id="camel-hist-scroll"><table class="solv-resumen-tabla mc-hist mc-tablero" id="camel-hist"></table></div>
             </div>
             <div class="section mc-blanco">
                 <div class="eeff-titulo-fila">
@@ -15617,18 +15620,22 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             h += `<tr class="solv-clave"><td>CAMEL</td><td>Calificación promedio</td><td></td><td style="color:#64748b;">Promedio de los indicadores principales y el costo de agencia</td>
                   <td class="num">${{chip(c.promedio)}}${{_lupaMC(`verNivelesMC('promedio')`)}}</td><td class="num">${{chip(p ? p.camel.promedio : null)}}</td></tr></tbody>`;
             document.getElementById('camel-tabla').innerHTML = h;
-            // Puntajes de los últimos 13 meses
-            const desde = Math.max(0, i - 12), ult = DATOS_MATCAMEL.slice(desde, i + 1);
-            let hh = `<thead><tr><th>Indicador</th>${{ult.map(x => `<th>${{_etqMC(x)}}</th>`).join('')}}</tr></thead><tbody>`;
+            // Puntajes de todos los meses (barra de desplazamiento; arranca en el mes elegido)
+            const ult = DATOS_MATCAMEL.slice(0, i + 1);
+            const cAct = k => k === ult.length - 1 ? ' class="mc-tab-actual"' : '';
+            let hh = `<thead><tr><th class="mc-tab-fija">Indicador</th>${{ult.map((x, k) => `<th${{cAct(k)}}>${{_etqMC(x)}}</th>`).join('')}}</tr></thead><tbody>`;
             c.indicadores.forEach(x => {{
-                hh += `<tr><td>${{x.nombre}}</td>${{ult.map(y => {{
+                hh += `<tr><td class="mc-tab-fija">${{x.nombre}}</td>${{ult.map((y, k) => {{
                     const it = y.camel.indicadores.find(z => z.variable === x.variable);
-                    return `<td>${{chip(it ? it.puntaje : null)}}</td>`;
+                    return `<td${{cAct(k)}}>${{chip(it ? it.puntaje : null)}}</td>`;
                 }}).join('')}}</tr>`;
             }});
-            hh += `<tr class="solv-total"><td>Costo de agencia</td>${{ult.map(y => `<td>${{chip(y.camel.costo_agencia)}}</td>`).join('')}}</tr>`;
-            hh += `<tr class="solv-clave"><td>Calificación CAMEL</td>${{ult.map(y => `<td>${{chip(y.camel.promedio)}}</td>`).join('')}}</tr></tbody>`;
+            hh += `<tr class="solv-total"><td class="mc-tab-fija">Costo de agencia</td>${{ult.map((y, k) => `<td${{cAct(k)}}>${{chip(y.camel.costo_agencia)}}</td>`).join('')}}</tr>`;
+            hh += `<tr class="solv-clave"><td class="mc-tab-fija">Calificación CAMEL</td>${{ult.map((y, k) => `<td${{cAct(k)}}>${{chip(y.camel.promedio)}}</td>`).join('')}}</tr></tbody>`;
             document.getElementById('camel-hist').innerHTML = hh;
+            const scH = document.getElementById('camel-hist-scroll');
+            const irH = () => {{ scH.scrollLeft = scH.scrollWidth; }};
+            irH(); setTimeout(irH, 80);
             // Histórico: columnas por nivel de riesgo
             _graficoNivelesMC('camel');
             _tableroMC('camel');
@@ -15834,6 +15841,25 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H);
                 L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
                 return {{ titulo, subtitulo, canvas: L.cv, html: ex.html, texto: ex.texto, archivo: `Tablero_${{clave.toUpperCase()}}_${{rango}}.png` }};
+            }} }});
+        }}
+        function copiarPuntajesCAMEL() {{
+            const st = MC_STATE.camel, tabla = document.getElementById('camel-hist'), wrap = tabla.parentElement;
+            const n = tabla.rows[0].cells.length - 1;   // meses visibles en la tabla (hasta el mes elegido)
+            const fija = tabla.querySelector('th.mc-tab-fija').offsetWidth;
+            const visible = _visibleScrollMC(wrap, n, fija);
+            const info = {{ tipo: 'columnas', idx: [...Array(n).keys()].map(k => k + 1) }};
+            abrirModalCopia({{ generar: async (rango) => {{
+                if (document.fonts && document.fonts.ready) await document.fonts.ready;
+                const idxs = _idxsRangoMC(rango, n - 1, visible);
+                const clon = _tcClonar(tabla, info, new Set(idxs.map(k => k + 1)));
+                const titulo = 'CAMEL · Puntajes por mes';
+                const subtitulo = _txtRangoMC(rango, idxs) + ' · 1 = mejor · 5 = peor';
+                const ex = _tcExcel(titulo, subtitulo, [{{ titulo: '', tabla: clon }}]);
+                const img = await _tcImagen([{{ titulo: '', tabla: clon.cloneNode(true) }}]);
+                const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H);
+                L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
+                return {{ titulo, subtitulo, canvas: L.cv, html: ex.html, texto: ex.texto, archivo: `CAMEL_puntajes_${{rango}}.png` }};
             }} }});
         }}
         async function copiarInstrumentoMC(clave) {{
@@ -28665,6 +28691,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 {{ nombre: 'Margen Neto', modulo: 'Excedente / Ingresos', serie: SERIE_MARGEN, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F6A141', click: 'abrirRendMn' }},
                 {{ nombre: 'Suficiencia del Margen', modulo: 'Margen Fin. / Gastos op.', serie: SERIE_SUFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#1FA64A', click: 'abrirSuficiencia' }},
                 {{ nombre: 'Margen de Resistencia', modulo: 'Rend. cartera − costos y exigencias', serie: SERIE_MARGEN_RESIST, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, punto: '#0E8A57', click: 'abrirMargenResistencia' }},
+                {{ nombre: 'Margen EBITDA', modulo: 'EBITDA / Ingresos (acumulado)', serie: DATOS_EBITDA.map(r => r.margen === null ? null : r.margen * 100), fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#0E6B2A', click: 'abrirEBITDA' }},
                 {{ nombre: 'ROE · Rent. Patrimonio', modulo: 'Excedente / Patrimonio', serie: SERIE_ROE, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#F78502', click: 'abrirRendRoe' }},
                 {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#A75A00', click: 'abrirRendRoa' }},
                 {{ nombre: 'ROIC · Rent. Capital Inv.', modulo: 'Excedente / Capital invertido', serie: SERIE_ROIC, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#9B86C0', click: 'abrirRendRoic' }},
