@@ -26,6 +26,7 @@ CÓMO EDITAR EL MODELO:
 """
 
 import re
+import math
 import sys
 import json
 import webbrowser
@@ -2622,19 +2623,23 @@ def calcular_estados_financieros(df: pd.DataFrame, periodos: list[tuple[int, str
     }
 
 
+def _nombre_cuenta_legible(nombre) -> str:
+    """Corrige la codificación de los nombres PUC del balance y los deja en tipo oración."""
+    n = (str(nombre).strip().replace('\x90', 'É').replace('\x84', 'á').replace('\x8a', 'é')
+         .replace('\xa1', 'í').replace('\x82', 'é').replace('\xa3', 'ó').replace('\xa2', 'ó')
+         .replace('\xe0', 'Ó').replace('\xc0', 'Ó').replace('\xd6', 'Í').replace('\xcc', 'Í')
+         .replace('PéBLIC', 'PÚBLIC').replace('\xa0', ' '))
+    n = re.sub(r"[EÉ]É|ÉE", "É", n)          # "CREÉDITOS" / "CRÉEDITOS" → "CRÉDITOS"
+    n = re.sub(r"\s+", " ", n)
+    return n[:1].upper() + n[1:].lower()
+
+
 def _saldos_subcuentas(df: pd.DataFrame, periodos: list[tuple[int, str]]) -> dict:
     """Saldos (millones, acumulados) de las cuentas de 4, 6 y 9 dígitos de las
     clases 1 a 6, para el botón "+" que desagrega cuentas en el E.S.F. / E.R.I.
     Retorna {codigo: [nombre, [saldo por período]]}; omite cuentas siempre en cero.
     El movimiento mensual del E.R.I. se calcula en el navegador a partir de estos saldos."""
-    def limpiar(nombre) -> str:
-        n = (str(nombre).strip().replace('\x90', 'É').replace('\x84', 'á').replace('\x8a', 'é')
-             .replace('\xa1', 'í').replace('\x82', 'é').replace('\xa3', 'ó').replace('\xa2', 'ó')
-             .replace('\xe0', 'Ó').replace('\xc0', 'Ó').replace('\xd6', 'Í').replace('\xcc', 'Í')
-             .replace('PéBLIC', 'PÚBLIC').replace('\xa0', ' '))
-        n = re.sub(r"[EÉ]É|ÉE", "É", n)          # "CREÉDITOS" / "CRÉEDITOS" → "CRÉDITOS"
-        n = re.sub(r"\s+", " ", n)
-        return n[:1].upper() + n[1:].lower()
+    limpiar = _nombre_cuenta_legible
     sub = df[df["CUENTA"].str.len().isin([4, 6, 9]) & df["CUENTA"].str[0].isin(list("123456"))]
     tabla = sub.pivot_table(index="CUENTA", columns=["AÑO", "MES"], values="NUEVO SALDO",
                             aggfunc="sum", fill_value=0.0) / 1_000_000
@@ -2644,6 +2649,490 @@ def _saldos_subcuentas(df: pd.DataFrame, periodos: list[tuple[int, str]]) -> dic
     nombres = sub.drop_duplicates("CUENTA", keep="last").set_index("CUENTA")["NOMBRE CUENTA"]
     return {cod: [limpiar(nombres.get(cod, cod)), [float(v) for v in fila]]
             for cod, fila in zip(tabla.index, tabla.values)}
+
+
+# ==============================================================================
+# MODELOS MAT (Alerta Temprana) Y CAMEL — PARÁMETROS VERSIONADOS
+# ==============================================================================
+# Réplica de la hoja "Ind. MAT y CAMELS" del archivo de Estados Financieros.
+# Todas las variables, coeficientes, rangos de puntaje y niveles viven en el
+# Excel "parametros.xlsx" (junto a BALANCES.xlsx), editable por el usuario.
+#
+# VERSIONES: la hoja "Versiones" define desde qué mes (AAAA-MM) aplica cada
+# versión. Cada período se calcula con la versión vigente en ese mes, de modo que
+# un cambio de parámetros NO recalcula los meses anteriores a su vigencia.
+# En las demás hojas cada fila indica a qué versión pertenece; si una hoja no
+# tiene filas para la versión vigente, se usan las de la versión anterior más
+# reciente (así una versión nueva solo necesita las hojas que cambian).
+#
+# EXPRESIONES (columnas Numerador / Denominador de la hoja "Variables"):
+#   - números = cuentas PUC (saldo en pesos del balance), ej. "41-6", "11+1203"
+#   - nombres = otra variable de la hoja o un dato del modelo:
+#       SOLVENCIA (relación de solvencia), CALIDAD_CARTERA (cartera B+C+D+E /
+#       cartera total), CARTERA_A y CARTERA_B (saldo de capital por calificación)
+#   - denominador vacío = la variable es el numerador tal cual
+
+NOMBRE_PARAMETROS = "parametros.xlsx"
+
+PARAMETROS_POR_DEFECTO = {
+    "Versiones": {
+        "columnas": ["Version", "Vigente desde (AAAA-MM)", "Descripción"],
+        "anchos": [10, 24, 70],
+        "filas": [[1, "2016-01", "Versión inicial: réplica de la hoja 'Ind. MAT y CAMELS' (aplica a todo el histórico)"]],
+    },
+    "Variables": {
+        "columnas": ["Version", "Variable", "Nombre", "Numerador", "Denominador", "Formato", "Descripción"],
+        "anchos": [10, 22, 40, 50, 22, 10, 60],
+        "filas": [
+            [1, "CARTERA_BRUTA", "Cartera bruta", "14-1406-1443-1470+1445+1446+1447+1468+1472", "", "monto",
+             "Cartera neta (14) sin intereses (1406, 1443, 1470) más deterioros (1445, 1446, 1447, 1468, 1472)"],
+            [1, "CARTERA_AB", "Cartera productiva A y B", "CARTERA_A+CARTERA_B", "", "monto", "Capital calificado en A y B"],
+            [1, "ROA", "Rentabilidad del activo", "35", "1", "%", "Resultado del ejercicio / Total activos"],
+            [1, "CARTERA_VENCIDA", "Índice de riesgo de cartera", "INDICE_RIESGO_CARTERA", "", "%", "Cartera B+C+D+E / Cartera total (con recalificación)"],
+            [1, "MARGEN_BRUTO", "Margen bruto", "41-6", "41", "%", "(Ingresos operacionales - Costos) / Ingresos operacionales"],
+            [1, "PATRIMONIO_ACTIVO", "Relación patrimonio a activo", "3", "1", "%", "Patrimonio total / Activo total"],
+            [1, "DISPONIBLE_ACTIVO", "Relación disponible a activo", "11+1203", "1", "%", "Disponible (11 + 1203) / Activo total"],
+            [1, "SOLVENCIA", "Margen de solvencia", "SOLVENCIA", "", "%", "Patrimonio técnico / Activos ponderados por riesgo"],
+            [1, "DEPOSITOS_CARTERA", "Relación depósitos a cartera", "21", "CARTERA_BRUTA", "%", "Depósitos / Cartera bruta"],
+            [1, "CARTERA_ACTIVO", "Relación cartera créditos a activos totales", "CARTERA_BRUTA", "1", "%", "Cartera bruta / Total activos"],
+            [1, "ACTIVO_FIJO", "Relación activo fijo a activo", "17", "1", "%", "Activos materiales / Activo total"],
+            [1, "SUFICIENCIA", "Suficiencia del margen", "41-6", "5-53", "%", "(Ingresos operacionales - Costos) / Gastos (5 sin 53)"],
+            [1, "MARGEN_TOTAL", "Margen total", "35", "4", "%", "Resultado del ejercicio / Total ingresos"],
+            [1, "GAP", "GAP operacional", "12+1120+CARTERA_AB", "21+23", "%", "(Inversiones + Efectivo restringido + Cartera A y B) / (Depósitos + Créditos financieros)"],
+        ],
+    },
+    "MAT": {
+        "columnas": ["Version", "Parámetro", "Variable", "Coeficiente", "Descripción"],
+        "anchos": [10, 22, 22, 16, 70],
+        "filas": [
+            [1, "INTERCEPTO", "", -0.87296791, "Constante del modelo logístico"],
+            [1, "COEFICIENTE", "ROA", -40.17984251, "A mayor rentabilidad, menor probabilidad de quiebra"],
+            [1, "COEFICIENTE", "CARTERA_VENCIDA", 0.05055825, "A mayor cartera vencida, mayor probabilidad de quiebra"],
+            [1, "COEFICIENTE", "MARGEN_BRUTO", -0.00044593, "A mayor margen bruto, menor probabilidad de quiebra"],
+            [1, "COEFICIENTE", "PATRIMONIO_ACTIVO", -2.00465396, "A mayor relación patrimonio-activo, menor probabilidad de quiebra"],
+            [1, "COEFICIENTE", "DISPONIBLE_ACTIVO", -3.82778115, "A menor relación disponible-activo, mayor probabilidad de quiebra"],
+        ],
+    },
+    "MAT_Niveles": {
+        "columnas": ["Version", "Desde (0-100)", "Hasta (0-100)", "Nivel", "Color"],
+        "anchos": [10, 16, 16, 18, 12],
+        "filas": [[1, 0, 10, "Bajo", "#17A53D"], [1, 10, 20, "Moderado", "#E3B23C"],
+                  [1, 20, 35, "Alto", "#F08A24"], [1, 35, "", "Crítico", "#C91A15"]],
+    },
+    "CAMEL_Indicadores": {
+        "columnas": ["Version", "Orden", "Variable", "Componente", "Grupo", "Unidad del rango"],
+        "anchos": [10, 8, 22, 26, 20, 22],
+        "filas": [
+            [1, 1, "SOLVENCIA", "Capital", "Principal", "x mínimo legal"],
+            [1, 2, "CARTERA_VENCIDA", "Calidad de activos", "Principal", "valor"],
+            [1, 3, "MARGEN_TOTAL", "Rentabilidad", "Principal", "valor"],
+            [1, 4, "GAP", "Liquidez (GAP)", "Principal", "valor"],
+            [1, 5, "DEPOSITOS_CARTERA", "Administración", "Costo de agencia", "valor"],
+            [1, 6, "CARTERA_ACTIVO", "Administración", "Costo de agencia", "valor"],
+            [1, 7, "ACTIVO_FIJO", "Administración", "Costo de agencia", "valor"],
+            [1, 8, "SUFICIENCIA", "Administración", "Costo de agencia", "valor"],
+        ],
+    },
+    "CAMEL_Rangos": {
+        "columnas": ["Version", "Variable", "Puntaje", "Desde (incluido)", "Hasta (excluido)", "Regla original"],
+        "anchos": [10, 22, 10, 18, 18, 60],
+        "filas": [
+            [1, "SOLVENCIA", 1, 1.333, "", "Solvencia > 1,333 × mínimo legal"],
+            [1, "SOLVENCIA", 2, 1.222, 1.333, "Entre 1,222 y 1,333 × mínimo legal"],
+            [1, "SOLVENCIA", 3, 1.111, 1.222, "Entre 1,111 y 1,222 × mínimo legal"],
+            [1, "SOLVENCIA", 4, 1.0, 1.111, "Entre el mínimo legal y 1,111 × mínimo legal"],
+            [1, "SOLVENCIA", 5, "", 1.0, "Menor al mínimo legal"],
+            [1, "CARTERA_VENCIDA", 1, "", 0.05, "Menor a 5%"],
+            [1, "CARTERA_VENCIDA", 2, 0.05, 0.08, "Entre 5% y 8%"],
+            [1, "CARTERA_VENCIDA", 3, 0.08, 0.09, "Entre 8% y 9%"],
+            [1, "CARTERA_VENCIDA", 4, 0.09, 0.10, "Entre 9% y 10%"],
+            [1, "CARTERA_VENCIDA", 5, 0.10, "", "Mayor a 10%"],
+            [1, "MARGEN_TOTAL", 1, 0.04, "", "Mayor a 4%"],
+            [1, "MARGEN_TOTAL", 2, 0.02, 0.04, "Entre 2% y 4%"],
+            [1, "MARGEN_TOTAL", 3, -0.05, 0.02, "Entre -5% y 2%"],
+            [1, "MARGEN_TOTAL", 4, -0.25, -0.05, "Entre -25% y -5%"],
+            [1, "MARGEN_TOTAL", 5, "", -0.25, "Menor a -25%"],
+            [1, "GAP", 1, 1.75, "", "Mayor a 175%"],
+            [1, "GAP", 2, 1.40, 1.75, "Entre 140% y 175%"],
+            [1, "GAP", 3, 1.25, 1.40, "Entre 125% y 140%"],
+            [1, "GAP", 4, 1.20, 1.25, "Entre 120% y 125%"],
+            [1, "GAP", 5, "", 1.20, "Menor a 120%"],
+            [1, "DEPOSITOS_CARTERA", 1, "", 1.01, "Menor a 101%"],
+            [1, "DEPOSITOS_CARTERA", 2, 1.01, 1.20, "Entre 101% y 120%"],
+            [1, "DEPOSITOS_CARTERA", 3, 1.20, 1.40, "Entre 120% y 140%"],
+            [1, "DEPOSITOS_CARTERA", 4, 1.40, 2.00, "Entre 140% y 200%"],
+            [1, "DEPOSITOS_CARTERA", 5, 2.00, "", "Mayor a 200%"],
+            [1, "CARTERA_ACTIVO", 1, 0.70, "", "Mayor a 70%"],
+            [1, "CARTERA_ACTIVO", 2, 0.60, 0.70, "Entre 60% y 70%"],
+            [1, "CARTERA_ACTIVO", 3, 0.55, 0.60, "Entre 55% y 60%"],
+            [1, "CARTERA_ACTIVO", 4, 0.50, 0.55, "Entre 50% y 55%"],
+            [1, "CARTERA_ACTIVO", 5, "", 0.50, "Menor a 50%"],
+            [1, "ACTIVO_FIJO", 1, "", 0.11, "Menor a 11%"],
+            [1, "ACTIVO_FIJO", 2, 0.11, 0.12, "Entre 11% y 12%"],
+            [1, "ACTIVO_FIJO", 3, 0.12, 0.15, "Entre 12% y 15%"],
+            [1, "ACTIVO_FIJO", 4, 0.15, 0.17, "Entre 15% y 17%"],
+            [1, "ACTIVO_FIJO", 5, 0.17, "", "Mayor a 17%"],
+            [1, "SUFICIENCIA", 1, 1.20, "", "Mayor a 120%"],
+            [1, "SUFICIENCIA", 2, 1.10, 1.20, "Entre 110% y 120%"],
+            [1, "SUFICIENCIA", 3, 1.00, 1.10, "Entre 100% y 110%"],
+            [1, "SUFICIENCIA", 4, 0.90, 1.00, "Entre 90% y 100%"],
+            [1, "SUFICIENCIA", 5, "", 0.90, "Menor a 90%"],
+        ],
+    },
+    "CAMEL_General": {
+        "columnas": ["Version", "Parámetro", "Valor", "Descripción"],
+        "anchos": [10, 28, 12, 70],
+        "filas": [[1, "MINIMO_LEGAL_SOLVENCIA", 0.09, "Relación de solvencia mínima legal (rangos 'x mínimo legal')"]],
+    },
+    "CAMEL_Niveles": {
+        "columnas": ["Version", "Desde (1-5)", "Hasta (1-5)", "Nivel (índice único)", "Color"],
+        "anchos": [10, 14, 14, 22, 12],
+        "filas": [[1, 1, 2, "Riesgo mínimo", "#17A53D"], [1, 2, 3, "Riesgo bajo", "#8BC34A"],
+                  [1, 3, 4, "Riesgo medio", "#E3B23C"], [1, 4, 5, "Riesgo alto", "#F08A24"],
+                  [1, 5, "", "Riesgo muy alto", "#C91A15"]],
+    },
+}
+
+_INSTRUCCIONES_PARAMETROS = [
+    "PARÁMETROS DE LOS MODELOS MAT Y CAMEL",
+    "",
+    "1. Para cambiar parámetros NO modifiques las filas existentes: agrega una versión nueva.",
+    "2. En la hoja 'Versiones' agrega una fila con el número de versión siguiente y el mes desde el que aplica (AAAA-MM).",
+    "3. En las hojas que cambian, agrega las filas completas de esa hoja con el nuevo número de versión.",
+    "   Las hojas sin filas para la versión nueva siguen usando la versión anterior.",
+    "4. Cada mes del histórico se calcula con la versión vigente en ese mes: los meses previos al cambio no se recalculan.",
+    "",
+    "Variables: Numerador/Denominador aceptan cuentas PUC (números) sumadas o restadas (ej. 41-6, 11+1203)",
+    "y nombres de otras variables o datos del modelo: SOLVENCIA, INDICE_RIESGO_CARTERA, CARTERA_A, CARTERA_B.",
+    "CAMEL_Rangos: el puntaje aplica si Desde <= valor < Hasta (vacío = sin límite).",
+    "Unidad del rango 'x mínimo legal': el valor se divide entre MINIMO_LEGAL_SOLVENCIA antes de comparar.",
+    "MAT: probabilidad de quiebra = 1 / (1 + e^-(intercepto + Σ coeficiente × variable)); escala 0-100 = probabilidad × 100.",
+    "CAMEL: promedio de los indicadores del grupo 'Principal' y del 'Costo de agencia' (promedio de su grupo).",
+]
+
+
+def crear_parametros_excel(ruta) -> None:
+    """Crea parametros.xlsx con la versión 1 (réplica del modelo actual)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Instrucciones"
+    for i, linea in enumerate(_INSTRUCCIONES_PARAMETROS, 1):
+        c = ws.cell(row=i, column=1, value=linea)
+        if i == 1:
+            c.font = Font(bold=True, size=14, color="11782C")
+    ws.column_dimensions["A"].width = 120
+    encabezado = PatternFill("solid", fgColor="11782C")
+    for hoja, d in PARAMETROS_POR_DEFECTO.items():
+        w = wb.create_sheet(hoja)
+        w.append(d["columnas"])
+        for c in w[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = encabezado
+            c.alignment = Alignment(horizontal="center", vertical="center")
+        for fila in d["filas"]:
+            w.append([None if v == "" else v for v in fila])
+        for j, ancho in enumerate(d["anchos"], 1):
+            w.column_dimensions[openpyxl.utils.get_column_letter(j)].width = ancho
+        w.freeze_panes = "A2"
+    wb.save(ruta)
+
+
+def leer_parametros_modelos(ruta) -> dict:
+    """Lee parametros.xlsx → {hoja: [dict por fila]} (claves = encabezados)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(ruta, data_only=True)
+    datos = {}
+    for hoja in PARAMETROS_POR_DEFECTO:
+        if hoja not in wb.sheetnames:
+            raise ValueError(f"Falta la hoja '{hoja}' en {ruta}")
+        filas = list(wb[hoja].iter_rows(values_only=True))
+        enc = [str(c).strip() if c is not None else "" for c in filas[0]]
+        datos[hoja] = [dict(zip(enc, f)) for f in filas[1:] if any(v not in (None, "") for v in f)]
+    return datos
+
+
+def _version_vigente(params: dict, anio: int, mes: str) -> int:
+    meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+             "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+    clave = f"{anio:04d}-{meses.index(mes.upper()) + 1:02d}"
+    vigentes = [(str(f["Vigente desde (AAAA-MM)"])[:7], int(f["Version"])) for f in params["Versiones"]]
+    candidatas = [v for desde, v in vigentes if desde <= clave]
+    return max(candidatas) if candidatas else min(v for _, v in vigentes)
+
+
+def _filas_version(params: dict, hoja: str, version: int) -> list:
+    """Filas de la hoja para la versión: la propia o la anterior más reciente que tenga filas."""
+    disponibles = sorted({int(f["Version"]) for f in params[hoja] if f.get("Version") is not None})
+    usar = [v for v in disponibles if v <= version]
+    if not usar:
+        return []
+    v = usar[-1]
+    return [f for f in params[hoja] if int(f["Version"]) == v]
+
+
+def _num(v):
+    return None if v is None or (isinstance(v, str) and not v.strip()) else float(v)
+
+
+# Nombre legible de los datos que entrega el propio modelo (para mostrar las fórmulas)
+_NOMBRES_DATOS_MODELO = {
+    "SOLVENCIA": "Relación de solvencia",
+    "INDICE_RIESGO_CARTERA": "Índice de riesgo de cartera",
+    "CALIDAD_CARTERA": "Índice de riesgo de cartera",
+    "CARTERA_A": "Cartera calificada A",
+    "CARTERA_B": "Cartera calificada B",
+}
+
+
+# ==============================================================================
+# CARTERA Y PROVISIÓN (hoja «Cartera» del Excel de estados financieros)
+# ==============================================================================
+CARTERA_PROVISION = {
+    "Consumo": {
+        "A": {"cartera": ["141105", "141205", "144105", "146930", "144205"], "provision": ["144505", "144510"]},
+        "B": {"cartera": ["141110", "141210", "144110", "144210"], "provision": ["144515", "144520"]},
+        "C": {"cartera": ["141115", "141215", "144115", "144215"], "provision": ["144525", "144530"]},
+        "D": {"cartera": ["141120", "141220", "144120", "144220"], "provision": ["144535", "144540"]},
+        "E": {"cartera": ["141125", "141225", "144125", "144225"], "provision": ["144545", "144550"]},
+    },
+    "Vivienda": {
+        "A": {"cartera": ["140405", "140505", "146905"], "provision": []},
+        "B": {"cartera": ["140410", "140510"], "provision": ["140810001"]},
+        "C": {"cartera": ["140415", "140515"], "provision": ["140815001"]},
+        "D": {"cartera": ["140420", "140520"], "provision": ["140820001"]},
+        "E": {"cartera": ["140425", "140525"], "provision": ["140825001"]},
+    },
+}
+CUENTAS_PROVISION_GENERAL = ["1468"]
+
+
+def calcular_cartera_provision(df, periodos, todos_morosidad):
+    """Cartera y provisión por categoría (hoja «Cartera» del Excel de estados financieros), en pesos."""
+    saldos = df.assign(_abs=df["NUEVO SALDO"].abs()).groupby(["AÑO", "MES", "CUENTA"])["_abs"].sum().to_dict()
+    salida = []
+    for i, (anio, mes) in enumerate(periodos):
+        mes = mes.upper()
+        s = lambda c: float(saldos.get((anio, mes, c), 0.0))
+        grupos = {}
+        for g, cats in CARTERA_PROVISION.items():
+            grupos[g] = {}
+            for cat, ctas in cats.items():
+                cc = {c: s(c) for c in ctas["cartera"]}
+                cp = {c: s(c) for c in ctas["provision"]}
+                grupos[g][cat] = {"cartera": sum(cc.values()), "provision": sum(cp.values()),
+                                  "cuentas_cartera": cc, "cuentas_provision": cp}
+        pg = {c: s(c) for c in CUENTAS_PROVISION_GENERAL}
+        mora = todos_morosidad[i] if todos_morosidad and i < len(todos_morosidad) else {}
+        salida.append({"anio": anio, "mes": mes, "grupos": grupos, "provision_general": sum(pg.values()),
+                       "cuentas_provision_general": pg, "indice_mora": mora.get("indice_mora")})
+    return salida
+
+
+def calcular_mat_camel(df: pd.DataFrame, periodos: list, todos_resultados: list,
+                       todos_riesgo: list, params: dict) -> list:
+    """Calcula MAT y CAMEL de cada período con la versión de parámetros vigente."""
+    saldos = df.groupby(["AÑO", "MES", "CUENTA"])["NUEVO SALDO"].sum().to_dict()
+    nombres_cuenta = {c: _nombre_cuenta_legible(n) for c, n in
+                      df.drop_duplicates("CUENTA", keep="last").set_index("CUENTA")["NOMBRE CUENTA"].items()}
+    patron = re.compile(r"([+-]?)\s*([A-Za-z_][A-Za-z0-9_]*|\d+)")
+    salida = []
+    for i, (anio, mes) in enumerate(periodos):
+        mes = mes.upper()
+        version = _version_vigente(params, anio, mes)
+        especiales = {
+            "SOLVENCIA": todos_resultados[i]["solvencia"],
+            "INDICE_RIESGO_CARTERA": todos_riesgo[i]["calidad_cartera"],
+            "CALIDAD_CARTERA": todos_riesgo[i]["calidad_cartera"],      # nombre anterior, se sigue aceptando
+            "CARTERA_A": todos_riesgo[i]["cartera_A"] * 1_000_000,
+            "CARTERA_B": todos_riesgo[i]["cartera_B"] * 1_000_000,
+        }
+        defs = {str(f["Variable"]).strip(): f for f in _filas_version(params, "Variables", version)}
+        valores = {}
+
+        def legible(expr):
+            """'41-6' → 'Ingresos por venta de bienes y servicios − Costo de ventas'."""
+            expr = "" if expr is None else str(expr).strip()
+            partes = []
+            for signo, tok in patron.findall(expr.replace(" ", "")):
+                if tok.isdigit():
+                    nombre = nombres_cuenta.get(tok, f"Cuenta {tok}")
+                else:
+                    nombre = _NOMBRES_DATOS_MODELO.get(tok) or defs.get(tok, {}).get("Nombre") or tok
+                partes.append((" − " if signo == "-" else (" + " if partes else "")) + nombre)
+            return "".join(partes)
+
+        def formula_legible(f):
+            num, den = legible(f.get("Numerador")), legible(f.get("Denominador"))
+            if not den:
+                return num
+            envolver = lambda t: f"({t})" if (" − " in t or " + " in t) else t
+            return f"{envolver(num)} ÷ {envolver(den)}"
+
+        def evaluar(expr, pila=()):
+            expr = "" if expr is None else str(expr).strip()
+            if not expr:
+                return None
+            total = 0.0
+            for signo, tok in patron.findall(expr.replace(" ", "")):
+                if tok.isdigit():
+                    v = saldos.get((anio, mes, tok), 0.0)
+                elif tok in especiales:
+                    v = especiales[tok]
+                elif tok in defs:
+                    v = valor_variable(tok, pila)
+                else:
+                    raise ValueError(f"'{tok}' no es una cuenta, variable ni dato del modelo (expresión '{expr}')")
+                if v is None:
+                    return None
+                total += -v if signo == "-" else v
+            return total
+
+        def valor_variable(nombre, pila=()):
+            if nombre in valores:
+                return valores[nombre]
+            if nombre in pila:
+                raise ValueError(f"Referencia circular en la variable {nombre}")
+            f = defs[nombre]
+            num = evaluar(f.get("Numerador"), pila + (nombre,))
+            den = evaluar(f.get("Denominador"), pila + (nombre,))
+            v = num if den is None else (num / den if num is not None and den else None)
+            valores[nombre] = v
+            return v
+
+        for nombre in defs:
+            valor_variable(nombre)
+
+        def terminos(expr):
+            """Cada término de la expresión con su saldo: cuentas contables, datos del modelo u otras variables."""
+            expr = "" if expr is None else str(expr).strip()
+            lista = []
+            for signo, tok in patron.findall(expr.replace(" ", "")):
+                if tok.isdigit():
+                    tipo, nombre, v = "Cuenta contable", nombres_cuenta.get(tok, f"Cuenta {tok}"), saldos.get((anio, mes, tok), 0.0)
+                elif tok in especiales:
+                    tipo, nombre, v = "Dato del modelo", _NOMBRES_DATOS_MODELO.get(tok, tok), especiales[tok]
+                else:
+                    tipo, nombre, v = "Variable", defs.get(tok, {}).get("Nombre", tok), valores.get(tok)
+                lista.append({"s": "-" if signo == "-" else "+", "cod": tok, "nombre": nombre, "tipo": tipo,
+                              "valor": None if v is None else round(float(v), 6)})
+            return lista
+
+        # Desglose de los datos que vienen de otros módulos (en pesos)
+        sol, rsg = todos_resultados[i], todos_riesgo[i]
+        M = 1_000_000
+        def _lin(sec, cuenta, nombre, valor, pond=None, ponderado=None):
+            return {"sec": sec, "cuenta": str(cuenta or ""), "nombre": str(nombre or ""),
+                    "valor": None if valor is None else round(float(valor) * M, 2),
+                    "pond": None if pond is None else float(pond),
+                    "ponderado": None if ponderado is None else round(float(ponderado) * M, 2)}
+        det_sol = []
+        for grupo, g in (sol.get("grupos_activos") or {}).items():
+            for it in g["items"]:
+                det_sol.append(_lin(f"Activos ponderados · {grupo}", it["cuenta"], it["nombre"], it["valor"], it["ponderacion"], it["ponderado"]))
+        for it in sol.get("items_contingentes") or []:
+            det_sol.append(_lin("Contingentes", it["cuenta"], it["nombre"], it["valor"], it["ponderacion"], it["ponderado"]))
+        for it in sol.get("items_patrimonio_basico") or []:
+            det_sol.append(_lin("Patrimonio básico", it["cuenta"], it["nombre"], it["valor"], it["ponderacion"], it["ponderado"]))
+        for it in sol.get("items_deducciones") or []:
+            det_sol.append(_lin("Deducciones", it["cuenta"], it["nombre"], it["valor"], it["ponderacion"], it["ponderado"]))
+        for it in sol.get("items_patrimonio_adicional") or []:
+            det_sol.append(_lin("Patrimonio adicional", it["cuenta"], it["nombre"], it["valor"], it["ponderacion"], it["ponderado"]))
+        res_sol = {"apr": round(sol["apr_total"] * M, 2), "pb": round(sol["patrimonio_basico"] * M, 2),
+                   "ded": round(sol["total_deducciones"] * M, 2), "pa": round(sol["patrimonio_adicional"] * M, 2),
+                   "pt": round(sol["patrimonio_tecnico"] * M, 2), "solvencia": sol["solvencia"]}
+        det_rsg = [_lin("Cartera bruta", it["codigo"], nombres_cuenta.get(str(it["codigo"]), it["descripcion"]), it["valor"])
+                   for it in rsg.get("items_bruta") or []]
+        for cat, items in (rsg.get("detalle_categorias") or {}).items():
+            det_rsg += [_lin(f"Categoría {cat}", it["codigo"], nombres_cuenta.get(str(it["codigo"]), it["descripcion"]), it["valor"])
+                        for it in items]
+        res_rsg = {"bruta": round(rsg["cartera_total"] * M, 2), "A": round(rsg["cartera_A"] * M, 2),
+                   "B": round(rsg["cartera_B"] * M, 2), "C": round(rsg["cartera_C"] * M, 2),
+                   "D": round(rsg["cartera_D"] * M, 2), "E": round(rsg["cartera_E"] * M, 2),
+                   "bcde": round(rsg["total_bcde"] * M, 2), "indice": rsg["calidad_cartera"]}
+
+        # ---- MAT ----
+        filas_mat = _filas_version(params, "MAT", version)
+        z = sum(_num(f["Coeficiente"]) or 0 for f in filas_mat if str(f["Parámetro"]).upper() == "INTERCEPTO")
+        aportes = []
+        completo = True
+        for f in filas_mat:
+            if str(f["Parámetro"]).upper() != "COEFICIENTE":
+                continue
+            var = str(f["Variable"]).strip()
+            x = valores.get(var)
+            coef = _num(f["Coeficiente"]) or 0
+            if x is None:
+                completo = False
+            aportes.append({"variable": var, "nombre": defs.get(var, {}).get("Nombre", var),
+                            "coeficiente": coef, "valor": x, "aporte": None if x is None else coef * x})
+            z += 0 if x is None else coef * x
+        prob = (math.exp(z) / (1 + math.exp(z))) if completo else None
+        escala = None if prob is None else prob * 100
+        nivel_mat = _nivel(_filas_version(params, "MAT_Niveles", version), escala, "Desde (0-100)", "Hasta (0-100)", "Nivel")
+
+        # ---- CAMEL ----
+        minimo = next((_num(f["Valor"]) for f in _filas_version(params, "CAMEL_General", version)
+                       if str(f["Parámetro"]).strip().upper() == "MINIMO_LEGAL_SOLVENCIA"), 0.09)
+        rangos = _filas_version(params, "CAMEL_Rangos", version)
+        indicadores = []
+        for f in sorted(_filas_version(params, "CAMEL_Indicadores", version), key=lambda r: _num(r.get("Orden")) or 0):
+            var = str(f["Variable"]).strip()
+            x = valores.get(var)
+            unidad = str(f.get("Unidad del rango") or "valor").strip().lower()
+            comparar = None if x is None else (x / minimo if "mínimo" in unidad or "minimo" in unidad else x)
+            puntaje, regla = None, ""
+            for r in rangos:
+                if str(r["Variable"]).strip() != var or comparar is None:
+                    continue
+                desde, hasta = _num(r.get("Desde (incluido)")), _num(r.get("Hasta (excluido)"))
+                if (desde is None or comparar >= desde) and (hasta is None or comparar < hasta):
+                    puntaje, regla = int(_num(r["Puntaje"])), str(r.get("Regla original") or "")
+                    break
+            # Rangos de este indicador (para explicar el puntaje en el dashboard)
+            rangos_var = sorted(
+                [{"puntaje": int(_num(r["Puntaje"])), "desde": _num(r.get("Desde (incluido)")),
+                  "hasta": _num(r.get("Hasta (excluido)")), "regla": str(r.get("Regla original") or "")}
+                 for r in rangos if str(r["Variable"]).strip() == var],
+                key=lambda r: r["puntaje"])
+            indicadores.append({"variable": var, "nombre": defs.get(var, {}).get("Nombre", var),
+                                "componente": f.get("Componente"), "grupo": str(f.get("Grupo") or "Principal"),
+                                "valor": x, "puntaje": puntaje, "regla": regla,
+                                "unidad": unidad, "comparado": comparar, "rangos": rangos_var})
+        agencia = [x["puntaje"] for x in indicadores if x["grupo"].lower().startswith("costo") and x["puntaje"] is not None]
+        costo_agencia = sum(agencia) / len(agencia) if agencia else None
+        base = [x["puntaje"] for x in indicadores if not x["grupo"].lower().startswith("costo") and x["puntaje"] is not None]
+        if costo_agencia is not None:
+            base.append(costo_agencia)
+        promedio = sum(base) / len(base) if base else None
+        nivel_camel = _nivel(_filas_version(params, "CAMEL_Niveles", version), promedio, "Desde (1-5)", "Hasta (1-5)", "Nivel (índice único)")
+
+        version_info = next((f for f in params["Versiones"] if int(f["Version"]) == version), {})
+        salida.append({
+            "anio": anio, "mes": mes, "version": version,
+            "version_desde": str(version_info.get("Vigente desde (AAAA-MM)", ""))[:7],
+            "variables": {k: {"valor": v, "nombre": defs[k].get("Nombre", k), "formato": defs[k].get("Formato") or "%",
+                              "numerador": defs[k].get("Numerador"), "denominador": defs[k].get("Denominador"),
+                              "formula": formula_legible(defs[k]),
+                              "t_num": terminos(defs[k].get("Numerador")), "t_den": terminos(defs[k].get("Denominador"))}
+                          for k, v in valores.items()},
+            "auditoria": {"solvencia": {"lineas": det_sol, **res_sol}, "riesgo": {"lineas": det_rsg, **res_rsg}},
+            "mat": {"probabilidad": prob, "escala": escala, "z": z, "aportes": aportes, **nivel_mat},
+            "camel": {"indicadores": indicadores, "costo_agencia": costo_agencia, "promedio": promedio,
+                      "minimo_legal": minimo, **nivel_camel},
+        })
+    return salida
+
+
+def _nivel(filas: list, valor, col_desde: str, col_hasta: str, col_nivel: str) -> dict:
+    niveles = [{"desde": _num(f[col_desde]), "hasta": _num(f[col_hasta]), "nivel": f[col_nivel],
+                "color": f.get("Color") or "#64748b"} for f in filas]
+    actual = next((n for n in niveles if valor is not None
+                   and (n["desde"] is None or valor >= n["desde"]) and (n["hasta"] is None or valor < n["hasta"])),
+                  None)
+    return {"nivel": actual["nivel"] if actual else None, "color": actual["color"] if actual else "#64748b",
+            "niveles": niveles}
 
 
 # ==============================================================================
@@ -2670,6 +3159,9 @@ MENUS_LATERALES = [
         ("Cartera", "mora-root", "abrirIndiceMora", "Índice de Mora",
          "Morosidad por categoría", "#4BAE9B",
          '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><polyline points="12 7 12 13 16 15"/>'),
+        ("Cartera", "cartera-provision-root", "abrirCarteraProvision", "Cartera y Provisión",
+         "Categorías A–E, provisión y cubrimiento", "#2E8F84",
+         '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="10" x2="9" y2="20"/>'),
         ("Cartera", "cartera-activo-root", "abrirCarteraActivo", "Cartera sobre Activo",
          "Cartera / cuenta 1", "#3E8E7E",
          '<path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/>'),
@@ -2701,6 +3193,14 @@ MENUS_LATERALES = [
         ("Solvencia y capital", "capital-fogacoop-root", "abrirCapitalFogacoop", "Capital Institucional Fogacoop",
          "Metodología Fogacoop", "#9474C9",
          '<path d="M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6z"/><path d="M3 21h18"/>'),
+    ]},
+    {"id": "alertas", "titulo": "MAT y CAMEL", "color": "#C2562F", "submodulos": [
+        ("Alertas tempranas", "mat-root", "abrirMAT", "MAT · Alerta Temprana",
+         "Probabilidad de quiebra (0-100)", "#C2562F",
+         '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.5"/>'),
+        ("Alertas tempranas", "camel-root", "abrirCAMEL", "CAMEL",
+         "Calificación promedio (1-5)", "#E07A2E",
+         '<path d="M10 14V5a2 2 0 1 1 4 0v9"/><circle cx="12" cy="17" r="4"/><line x1="15" y1="7" x2="17" y2="7"/><line x1="15" y1="10" x2="17" y2="10"/>'),
     ]},
     {"id": "rentabilidad", "titulo": "Módulo Rentabilidad", "color": "#11782C", "submodulos": [
         ("Estados financieros", "esf-root", "abrirESF", "Estado de Situación Financiera",
@@ -2814,7 +3314,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                  series_indicadores: list = None,
                  cartera_segmentos: list = None,
                  catalogo_cuentas: dict = None,
-                 estados_financieros: dict = None) -> str:
+                 estados_financieros: dict = None,
+                 mat_camel: list = None, parametros_mc: dict = None, cartera_provision: list = None) -> str:
     """Genera el archivo HTML del dashboard interactivo."""
     datos_json = [_resultado_a_json(r) for r in todos_resultados]
     
@@ -2864,6 +3365,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
     # E.S.F. y E.R.I. mensuales (módulo Rentabilidad)
     if estados_financieros is None:
         estados_financieros = {"periodos": [], "esf": {"filas": [], "valores": {}}, "eri": {"secciones": []}}
+
+    if mat_camel is None:
+        mat_camel = []
 
     menus_laterales_html, menus_laterales_config = _construir_menus_laterales()
     
@@ -3115,18 +3619,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 /* ===== Sistema neumórfico · base verde cooperativo ===== */
                 /* Fondo verde-grisáceo muy claro y superficies del mismo tono,
                    para que el relieve neumórfico (sombra clara + oscura) funcione. */
-                --bg-grad: linear-gradient(135deg, #e7ece9 0%, #e3e9e6 100%);
-                --neu-bg: #e7ece9;          /* superficie neumórfica base */
-                --neu-bg2: #e9eeeb;
+                --bg-grad: linear-gradient(135deg, #eef0f3 0%, #e7eaee 100%);
+                --neu-bg: #eceef1;          /* superficie neumórfica base */
+                --neu-bg2: #eff1f4;
                 --neu-light: #ffffff;       /* luz superior-izquierda */
-                --neu-dark: #c5cdc8;        /* sombra inferior-derecha */
-                --card: #e7ece9;            /* las "tarjetas" usan el mismo tono que el fondo */
-                --card-soft: #e9eeeb;
-                --text: #1f312a;
-                --text-muted: #5f7269;
-                --text-light: #94a59c;
-                --border: #d4dcd7;
-                --border-soft: #dde4e0;
+                --neu-dark: #c8cdd5;        /* sombra inferior-derecha */
+                --card: #eceef1;            /* las "tarjetas" usan el mismo tono que el fondo */
+                --card-soft: #eff1f4;
+                --text: #1f2937;
+                --text-muted: #5b6472;
+                --text-light: #9aa3af;
+                --border: #d6dbe2;
+                --border-soft: #e1e5ea;
                 
                 /* Sombras neumórficas (relieve y hundido) */
                 --neu-out: 7px 7px 15px var(--neu-dark), -7px -7px 15px var(--neu-light);
@@ -3178,7 +3682,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 /* Superficie blanca para fondos de gráficos y gauges, con
                    sombras neumórficas ajustadas a un blanco más limpio. */
                 --neu-white: #ffffff;
-                --neu-white-dark: #d2d8d4;
+                --neu-white-dark: #d3d8df;
                 --neu-white-out: 6px 6px 14px var(--neu-white-dark), -6px -6px 14px #ffffff;
                 
                 --shadow: var(--neu-out-sm);
@@ -4253,6 +4757,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .modulo-ingresos:hover {{
                 box-shadow: var(--neu-out-lg);
             }}
+            .modulo-alertas {{
+                --card-color: #E0703A;
+                --card-color-soft: rgba(224,112,58,0.10);
+                --card-color-glow: rgba(224,112,58,0.30);
+                --card-color-deep: #B5452B;
+                --card-color-light: #F7A64A;
+                box-shadow: var(--neu-out);
+            }}
             
             .modulo-solvencia {{
                 --card-color: #17A53D;
@@ -5146,6 +5658,216 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 .mod-sidebar {{ padding-left: 12px; padding-right: 12px !important; min-height: 0; }}
             }}
 
+            /* === MAT y CAMEL === */
+            .mc-top {{ display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; margin-bottom: 18px; align-items: stretch; }}
+            .mc-top .mc-instrumento {{ flex-direction: column; justify-content: flex-start; gap: 6px; padding-top: 18px; }}
+            .mc-top .mc-sec-graf {{ margin-bottom: 0; min-width: 0; }}
+            .mc-kpi-filas {{ width: 100%; display: flex; flex-direction: column; gap: 6px; }}
+            .mc-kpi-fila {{
+                display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px;
+                padding: 8px 12px; border-radius: 10px; background: #fbf8f6; border-left: 4px solid var(--c);
+            }}
+            .mc-kpi-fila.principal {{ background: #fff4ec; }}
+            .mc-kpi-lbl {{ font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .3px; line-height: 1.25; }}
+            .mc-kpi-lbl small {{ display: block; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 10.5px; color: #94a3b8; }}
+            .mc-kpi-val {{ font-size: 18px; font-weight: 800; color: var(--c); white-space: nowrap; }}
+            .mc-kpi-val .mc-nivel {{ font-size: 12px !important; }}
+            .mc-kpi-var {{ font-size: 12px; white-space: nowrap; min-width: 54px; text-align: right; }}
+            #mat-kpis {{ gap: 10px; margin-top: 4px; }}
+            #mat-kpis .mc-kpi-fila {{ padding: 14px 16px; }}
+            #mat-kpis .mc-kpi-lbl {{ font-size: 12px; }}
+            #mat-kpis .mc-kpi-lbl small {{ font-size: 11.5px; margin-top: 2px; }}
+            #mat-kpis .mc-kpi-val {{ font-size: 22px; }}
+            #mat-kpis .mc-kpi-val .mc-nivel {{ font-size: 14px !important; padding: 4px 14px; }}
+            .mc-tabla-ancha {{ font-size: 12px; }}
+            .mc-tabla-ancha th {{ padding: 6px 10px; }}
+            .mc-tabla-ancha td {{ white-space: normal; padding: 4px 10px; line-height: 1.3; }}
+            .mc-top + .section {{ margin-top: -2px; }}
+            .mc-tabla-ancha td.num {{ white-space: nowrap; }}
+            .mc-derecha {{ display: flex; flex-direction: column; gap: 14px; min-width: 0; }}
+            .mc-derecha .evolucion-kpis-grid {{ margin-bottom: 0; }}
+            .mc-derecha .section {{ margin-bottom: 0; }}
+            .mc-graf-wrap {{ display: flex; align-items: flex-start; }}
+            .mc-eje {{ position: relative; width: 50px; height: 300px; flex-shrink: 0; }}
+            .mc-eje span {{ position: absolute; right: 8px; transform: translateY(-50%); font-size: 11px; color: #94a3b8; font-weight: 500; }}
+            .mc-graf-wrap .mc-graf-scroll {{ flex: 1; min-width: 0; }}
+            @media (max-width: 1000px) {{ .mc-top {{ grid-template-columns: 1fr; }} }}
+            .mc-instrumento {{
+                background: #ffffff; border-radius: 18px; padding: 14px; display: flex; align-items: center; justify-content: center;
+                box-shadow: 0 10px 28px rgba(15,23,42,0.08); border: 1px solid #f1ebe7;
+            }}
+            .mc-instrumento svg {{ width: 100%; max-width: 330px; height: auto; }}
+            .mc-termo svg {{ max-width: 320px; }}
+            .mc-kpis {{ align-content: start; }}
+            .mc-version {{
+                display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+                background: #fff4ec; color: #B5452B; border: 1px solid #f5d2bd; font-size: 12px; font-weight: 600; white-space: nowrap;
+            }}
+            .section.mc-blanco {{ background: #ffffff !important; }}
+            .mc-chip {{
+                display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 22px; padding: 0 7px;
+                border-radius: 7px; color: #ffffff; font-weight: 800; font-size: 12px;
+            }}
+            .mc-nivel {{ display: inline-block; padding: 3px 12px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 12px; }}
+            .mc-lupa {{
+                display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 6px; padding: 0;
+                border: 1.5px solid #f5d2bd; border-radius: 50%; background: #fff7f1; color: #B5452B; cursor: pointer;
+                vertical-align: middle; transition: transform .15s, background .15s;
+            }}
+            .mc-lupa:hover {{ background: #B5452B; color: #ffffff; transform: scale(1.12); }}
+            .mc-lupa svg {{ width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }}
+            .mc-modal-caja {{ width: min(1080px, 100%); }}
+            .mc-modal-graf {{ position: relative; height: 340px; }}
+            .mc-modal-herr {{ display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 4px 0 8px; }}
+            /* Encabezado de cada módulo fijo al desplazarse (pantallas amplias); en equipos pequeños se desplaza normal */
+            @media (min-width: 1101px) and (min-height: 640px) {{
+                .container > header.header {{ position: sticky; top: 0; z-index: 500; transition: padding .2s ease, box-shadow .2s ease; }}
+                .container > header.header.pegado {{
+                    background: rgba(236, 238, 241, .94); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+                    margin-left: -24px; margin-right: -24px; padding: 14px 190px 12px 24px; min-height: 100px;
+                    box-shadow: 0 8px 20px rgba(15, 23, 42, .08); border-bottom-color: transparent; align-items: center;
+                }}
+                .container > header.header.pegado .subtitle {{ display: none; }}
+                body:not(.con-sidebar) .container > header.header.pegado {{ padding-left: 196px; }}
+            }}
+            @media print {{ .container > header.header {{ position: static !important; }} }}
+            /* ===== Cartera y Provisión ===== */
+            .cp-filtros-cmp {{ align-items: center; }}
+            .cp-vs {{ font-size: 12px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; margin-right: 2px; }}
+            .cp-chips {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 16px; }}
+            .cp-chips-lbl {{ font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .4px; margin-right: 4px; }}
+            .cp-chip {{ border: 1px solid #d6dbe2; background: #ffffff; color: #475569; border-radius: 999px; padding: 6px 14px; font: inherit;
+                       font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease; }}
+            .cp-chip:hover:not([disabled]) {{ border-color: #1E7F73; color: #1E7F73; }}
+            .cp-chip.activo {{ background: #1E7F73; border-color: #1E7F73; color: #ffffff; box-shadow: 0 4px 12px rgba(30, 127, 115, .25); }}
+            .cp-chip[disabled] {{ cursor: default; opacity: .55; }}
+            .cp-chip[disabled].activo {{ opacity: 1; }}
+            .cp-kpis {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }}
+            .cp-kpi {{ background: #ffffff; border-radius: 18px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); border-top: 4px solid var(--c); }}
+            .cp-kpi-lbl {{ font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .4px; }}
+            .cp-kpi-val {{ font-size: 24px; font-weight: 800; color: #0f172a; margin: 6px 0 8px; font-variant-numeric: tabular-nums; }}
+            .cp-kpi-pie {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }}
+            .cp-kpi-sub {{ color: #94a3b8; font-size: 11px; }}
+            .cp-tabla-wrap {{ overflow-x: auto; }}
+            .cp-tabla {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }}
+            .cp-tabla th {{ font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .3px; padding: 8px 10px;
+                           text-align: right; border-bottom: 1px solid #e2e8f0; white-space: nowrap; background: #f8fafc; }}
+            .cp-tabla th.cp-cat, .cp-tabla td.cp-cat {{ text-align: left; }}
+            .cp-tabla .cp-grupo-cab th {{ text-align: center; font-size: 12px; text-transform: none; letter-spacing: 0; border-bottom: none; }}
+            .cp-tabla th.cp-g-act {{ background: #1E7F73; color: #ffffff; border-radius: 10px 10px 0 0; }}
+            .cp-tabla th.cp-g-cmp {{ background: #475569; color: #ffffff; border-radius: 10px 10px 0 0; }}
+            .cp-tabla th.cp-g-var {{ background: #E08A00; color: #ffffff; border-radius: 10px 10px 0 0; }}
+            .cp-tabla.cp-ind th.cp-g-act, .cp-tabla.cp-ind th.cp-g-cmp, .cp-tabla.cp-ind th.cp-g-var {{ border-radius: 0; text-align: right; }}
+            .cp-tabla td {{ padding: 7px 10px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; color: #1f2937; }}
+            .cp-tabla td.num {{ text-align: right; }}
+            .cp-tabla td.cp-sep, .cp-tabla th.cp-sep {{ border-left: 2px solid #eef2f6; }}
+            .cp-tabla td.cp-neta {{ font-weight: 700; color: #0f172a; }}
+            .cp-tabla td.cp-cob {{ color: #64748b; font-size: 11.5px; }}
+            .cp-tabla td.cp-cat small {{ color: #94a3b8; font-size: 11px; margin-left: 6px; }}
+            .cp-tabla.cp-ind td.cp-cat small {{ display: block; margin: 2px 0 0; }}
+            .cp-tabla .cp-ind-val {{ font-weight: 800; color: #1E7F73; }}
+            .cp-tabla tbody tr:hover td {{ background: #f8fbfa; }}
+            .cp-dot {{ display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }}
+            .cp-titulo-grupo td {{ background: #e6f2f0 !important; color: #1E7F73; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; }}
+            .cp-subtotal td {{ background: #f8fafc; font-weight: 700; border-bottom: 1px solid #e2e8f0; }}
+            .cp-total td {{ background: #eef6f4; font-weight: 800; border-top: 2px solid #1E7F73; }}
+            .cp-pg td {{ color: #475569; font-weight: 600; }}
+            .cp-neta-total td {{ background: #1E7F73 !important; color: #ffffff !important; font-weight: 800; }}
+            .cp-neta-total td .cp-var {{ color: #ffffff !important; }}
+            .cp-neta-total td:first-child {{ border-radius: 0 0 0 12px; }}
+            .cp-neta-total td:last-child {{ border-radius: 0 0 12px 0; }}
+            .cp-var {{ font-weight: 700; font-size: 11.5px; }}
+            .cp-tabla:not(.cp-ind) {{ font-size: 12px; }}
+            .cp-tabla:not(.cp-ind) td {{ padding: 6px 7px; }}
+            .cp-tabla:not(.cp-ind) th {{ padding: 7px 7px; }}
+            .cp-tabla:not(.cp-ind) td.cp-cat small {{ display: none; }}
+            @media (min-width: 1700px) {{ .cp-tabla:not(.cp-ind) td.cp-cat small {{ display: inline; }} }}
+            .cp-var.sube, .cp-varp.sube {{ color: #15803d; }}
+            .cp-var.baja, .cp-varp.baja {{ color: #c2410c; }}
+            .cp-var.igual, .cp-varp.igual {{ color: #94a3b8; }}
+            .cp-varp {{ font-size: 11.5px; }}
+            .cp-dos {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }}
+            .cp-comp-fila {{ display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; align-items: center; margin-bottom: 14px; }}
+            .cp-comp-etq {{ font-size: 12px; font-weight: 700; color: #334155; }}
+            .cp-comp-barra {{ display: flex; height: 22px; border-radius: 8px; overflow: hidden; background: #f1f5f9; }}
+            .cp-comp-barra i {{ display: block; height: 100%; }}
+            .cp-comp-riesgo {{ grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #475569; font-variant-numeric: tabular-nums; }}
+            .cp-comp-ley {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: #64748b; border-top: 1px solid #eef2f6; padding-top: 10px; }}
+            @media (max-width: 1100px) {{ .cp-dos {{ grid-template-columns: 1fr; }} }}
+            @media (max-width: 760px) {{ .cp-kpis {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+            /* ===== Barra común de gráficos: Copiar imagen y Colores ===== */
+            .gbar {{ display: flex; justify-content: flex-end; gap: 8px; margin: -2px 0 8px; position: relative; z-index: 6; }}
+            .gbar.gbar-flota {{ position: absolute; top: 18px; right: 20px; margin: 0; }}
+            .hg-rel {{ position: relative; }}
+            .mc-herr .gbar, .mc-modal-herr .gbar {{ margin: 0; }}
+            .gp {{ position: relative; }}
+            .gp > button {{ border: 0; background: #fff; box-shadow: 3px 3px 9px #e2e5f4, -3px -3px 9px #ffffff; border-radius: 10px;
+                           padding: 5px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+                           font: inherit; font-size: 11.5px; color: #6b7890; }}
+            .gp > button:hover {{ color: #5b6cff; }}
+            .gp > button svg {{ width: 15px; height: 15px; }}
+            .gpop {{ display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #fff;
+                    box-shadow: 8px 8px 24px #d5dbe7, -4px -4px 14px #ffffff; border-radius: 14px; padding: 8px; z-index: 60;
+                    width: 250px; max-height: min(70vh, 560px); overflow-y: auto; text-align: left; }}
+            .gp.ab .gpop {{ display: block; }}
+            .gpop.gcp {{ width: 190px; }}
+            .gp.ab .gpop.gcp {{ display: flex; flex-direction: column; gap: 6px; }}
+            .gcp button {{ border: 0; background: #fff; box-shadow: 3px 3px 9px #e2e5f4, -3px -3px 9px #ffffff; border-radius: 9px;
+                          padding: 8px 10px; cursor: pointer; font: inherit; font-size: 12px; color: #27324a; text-align: left; }}
+            .gcp button:hover {{ background: #f0f2ff; }}
+            .gpi {{ display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; cursor: pointer; font-size: 12px; color: #27324a; }}
+            .gpi:hover {{ background: #eef0ff; }}
+            .gpi.act {{ box-shadow: inset 3px 3px 7px #dfe2f2, inset -3px -3px 7px #ffffff; font-weight: 600; color: #5b6cff; }}
+            .gsw {{ display: inline-flex; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(39, 50, 74, .25); flex: none; }}
+            .gsw i {{ width: 13px; height: 16px; display: block; }}
+            .gtd {{ display: flex; gap: 6px; margin-top: 6px; border-top: 1px solid #e6eaf2; padding-top: 8px; }}
+            .gtd button {{ flex: 1; border: 0; background: #fff; box-shadow: 3px 3px 9px #e2e5f4, -3px -3px 9px #ffffff; border-radius: 9px;
+                          padding: 6px 4px; cursor: pointer; font: inherit; font-size: 10.5px; color: #6b7890; }}
+            .gtd button:hover {{ color: #5b6cff; }}
+            @media print {{ .gbar {{ display: none !important; }} }}
+            .mc-tablero {{ font-size: 12px; }}
+            .mc-tablero th, .mc-tablero td {{ white-space: nowrap; }}
+            .mc-tablero .mc-tab-fija {{ position: sticky; left: 0; z-index: 2; background: #ffffff; min-width: 260px; box-shadow: 1px 0 0 #eef2f0; }}
+            .mc-tablero tr.solv-total .mc-tab-fija {{ background: #f8fafc; }}
+            .mc-tablero tr.solv-clave .mc-tab-fija {{ background: #faf8fd; }}
+            .mc-tablero thead .mc-tab-fija {{ background: #ffffff; }}
+            .mc-tablero .mc-tab-actual {{ background: #fff4ec !important; font-weight: 800; color: #B5452B; }}
+            .mc-tablero .mc-tab-anio {{ border-left: 1px dashed #e2c7b8; }}
+            .mc-tablero .mc-lupa {{ margin: 0 6px 0 0; }}
+            .mc-punto {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }}
+            .mc-modal-cuerpo {{ padding: 6px 22px 20px; overflow: auto; }}
+            .mc-explica {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0 16px; }}
+            .mc-explica > div {{ background: #fff7f1; border: 1px solid #f5d2bd; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }}
+            .mc-explica span:first-child {{ font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; }}
+            .mc-explica b {{ font-size: 22px; color: #0f172a; }}
+            .mc-explica small {{ color: #64748b; font-size: 12px; }}
+            .mc-rangos {{ margin-bottom: 12px; }}
+            .mc-rangos tr.mc-rango-activo td {{ background: #fff4ec; font-weight: 700; color: #B5452B; }}
+            .mc-rangos tr.mc-rango-activo td:first-child {{ box-shadow: inset 4px 0 0 #E0703A; }}
+            .mc-nota {{ font-size: 11.5px; color: #94a3b8; margin: 4px 0 0; }}
+            @media (max-width: 640px) {{ .mc-explica {{ grid-template-columns: 1fr; }} }}
+            .mc-herr {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+            .mc-paleta {{ display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; }}
+            .mc-paleta select {{
+                font-family: 'Poppins', sans-serif; font-size: 12.5px; font-weight: 600; color: #B5452B; text-transform: none; letter-spacing: 0;
+                border: 1.5px solid #f5d2bd; border-radius: 9px; padding: 5px 8px; background: #ffffff; cursor: pointer;
+            }}
+            .mc-leyenda {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }}
+            .mc-leyenda span {{ display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475569;
+                                 background: #f8fafc; border: 1px solid #eef2f0; border-radius: 999px; padding: 3px 10px 3px 6px; }}
+            .mc-leyenda i {{ width: 12px; height: 12px; border-radius: 4px; display: inline-block; }}
+            .mc-graf-scroll {{ overflow-x: auto; overflow-y: hidden; padding-bottom: 6px; }}
+            .mc-graf-scroll::-webkit-scrollbar {{ height: 8px; }}
+            .mc-graf-scroll::-webkit-scrollbar-thumb {{ background: #f0c6ae; border-radius: 99px; }}
+            .mc-graf-scroll::-webkit-scrollbar-track {{ background: #fdf3ee; border-radius: 99px; }}
+            .mc-graf-inner {{ position: relative; height: 300px; min-width: 100%; }}
+            .mc-instrumento {{ position: relative; }}
+            .mc-copiar-inst {{ position: absolute; top: 10px; right: 10px; padding: 4px 9px; font-size: 11.5px; z-index: 1; }}
+            .mc-hist td {{ text-align: center; }}
+            .mc-hist td:first-child {{ text-align: left; }}
+            .mc-hist th {{ text-align: center; }}
+            .mc-hist th:first-child {{ text-align: left; }}
+
             /* Resumen compacto para el análisis de solvencia */
             .solv-resumen-grid {{ display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; }}
             @media (max-width: 1750px) {{ .solv-resumen-grid {{ grid-template-columns: 1fr; }} }}
@@ -5336,6 +6058,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 12px; white-space: nowrap;
             }}
             .eeff-btn-copiar:hover {{ background: #eef6f0; }}
+            /* Halo de luz que se enciende y apaga alrededor del botón */
+            .eeff-btn-copiar {{ animation: eeffHalo 2.4s ease-in-out infinite; }}
+            .eeff-btn-copiar:hover {{ animation-play-state: paused; box-shadow: 0 0 0 3px rgba(23,165,61,0.25), 0 0 16px rgba(23,165,61,0.55); }}
+            @keyframes eeffHalo {{
+                0%, 100% {{ box-shadow: 0 0 0 0 rgba(23,165,61,0.0), 0 0 0 rgba(23,165,61,0.0); border-color: #b7d9c0; }}
+                50%      {{ box-shadow: 0 0 0 3px rgba(23,165,61,0.18), 0 0 14px rgba(23,165,61,0.55); border-color: #17A53D; }}
+            }}
+            @media (prefers-reduced-motion: reduce) {{ .eeff-btn-copiar {{ animation: none; }} }}
             .eeff-btn-copiar svg {{ width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }}
             /* Modal de comparativos */
             .eeff-modal {{
@@ -8544,6 +9274,24 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
+
+                <!-- MAT Y CAMEL -->
+                <div class="modulo-card modulo-hero modulo-alertas" onclick="abrirAlertas()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M4 18a8 8 0 1 1 16 0"/>
+                            <path d="M12 18l4-5"/>
+                            <circle cx="12" cy="18" r="1.5"/>
+                        </svg>
+                    </div>
+                    <h3 class="modulo-titulo">MAT y CAMEL</h3>
+                    <p class="modulo-descripcion">Alerta temprana de quiebra y calificación CAMEL con parámetros configurables.</p>
+                    <span class="modulo-accion">
+                        Ver módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
                 
             </div>
             
@@ -8701,6 +9449,20 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     </span>
                 </div>
                 
+                <!-- CARTERA Y PROVISIÓN -->
+                <div class="modulo-card modulo-evolucion-activo" onclick="abrirCarteraProvision()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="10" x2="9" y2="20"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">Cartera y Provisión</h3>
+                    <p class="modulo-descripcion">Cartera, provisión y cartera neta por categoría A–E, con cubrimiento; compara dos períodos.</p>
+                    <span class="modulo-accion">
+                        Abrir módulo
+                        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                </div>
+
                 <!-- CARTERA SOBRE ACTIVO -->
                 <div class="modulo-card modulo-evolucion-activo" onclick="abrirCarteraActivo()">
                     <span class="modulo-badge activo">Disponible</span>
@@ -10599,6 +11361,125 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             <div id="eri-secciones"></div>
         </div>
 
+        <!-- ========== MÓDULO: MAT (MODELO DE ALERTA TEMPRANA) ========== -->
+        <div class="container oculto" id="mat-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <h1 class="header-title-text" style="color:#B5452B;">MAT · Modelo de Alerta Temprana</h1>
+                    <div class="subtitle">Probabilidad de quiebra (modelo logístico)</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="mat-filtro-anio">Año</label><select id="mat-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="mat-filtro-mes">Mes</label><select id="mat-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="_xBoton(this, descargarExcelMAT)" title="Descargar resultados, cálculos, detalle de auditoría y parámetros en Excel">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="mc-top">
+                <div class="mc-instrumento">
+                    <button class="eeff-btn-copiar mc-copiar-inst" onclick="copiarInstrumentoMC('mat')" title="Copiar el velocímetro"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                    <svg id="mat-gauge" viewBox="0 0 320 285" role="img" aria-label="Velocímetro MAT"></svg>
+                    <div class="mc-kpi-filas" id="mat-kpis"></div>
+                </div>
+                <div class="section acc-graficos mc-blanco mc-sec-graf">
+                    <div class="eeff-titulo-fila">
+                        <h2 class="section-title">Evolución Histórica del MAT</h2>
+                        <div class="mc-herr" data-hg-slot="chartMAT"></div>
+                    </div>
+                    <p class="seccion-subtitulo">Probabilidad de quiebra en escala 0-100 · franjas de fondo = niveles de riesgo · desplázate con la barra inferior</p>
+                    <div class="mc-leyenda" id="mat-leyenda"></div>
+                    <div class="mc-graf-wrap"><div class="mc-eje" id="mat-eje"></div>
+                    <div class="mc-graf-scroll" id="mat-graf-scroll"><div class="mc-graf-inner" id="mat-graf-inner"><canvas id="chartMAT"></canvas></div></div></div>
+                </div>
+            </div>
+            <div class="section mc-blanco">
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Variables del Modelo</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarTablaMC('mat')" title="Copiar este cuadro"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                </div>
+                <p class="seccion-subtitulo" id="mat-tabla-sub">—</p>
+                <div class="solv-resumen-wrap"><table class="solv-resumen-tabla mc-tabla-ancha" id="mat-tabla"></table></div>
+            </div>
+            <div class="section mc-blanco">
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Tablero Histórico de Indicadores · MAT</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarTableroMC('mat')" title="Copiar el tablero"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                </div>
+                <p class="seccion-subtitulo">Resultados de cada mes · usa la lupa para ver la gráfica histórica del indicador · desplázate con la barra inferior</p>
+                <div class="mc-graf-scroll mc-tablero-wrap"><table class="solv-resumen-tabla mc-tablero" id="mat-tablero"></table></div>
+            </div>
+        </div>
+
+        <!-- ========== MÓDULO: CAMEL ========== -->
+        <div class="container oculto" id="camel-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <h1 class="header-title-text" style="color:#B5452B;">CAMEL</h1>
+                    <div class="subtitle">Capital, Activos, Administración, Rentabilidad y Liquidez</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="camel-filtro-anio">Año</label><select id="camel-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="camel-filtro-mes">Mes</label><select id="camel-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="_xBoton(this, descargarExcelCAMEL)" title="Descargar resultados, cálculos, detalle de auditoría y parámetros en Excel">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="mc-top">
+                <div class="mc-instrumento mc-termo">
+                    <button class="eeff-btn-copiar mc-copiar-inst" onclick="copiarInstrumentoMC('camel')" title="Copiar el termómetro"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                    <svg id="camel-termo" viewBox="0 0 300 330" role="img" aria-label="Termómetro CAMEL"></svg>
+                    <div class="mc-kpi-filas" id="camel-kpis"></div>
+                </div>
+                <div class="section acc-graficos mc-blanco mc-sec-graf">
+                    <div class="eeff-titulo-fila">
+                        <h2 class="section-title">Evolución Histórica del CAMEL</h2>
+                        <div class="mc-herr" data-hg-slot="chartCAMEL"></div>
+                    </div>
+                    <p class="seccion-subtitulo">Calificación promedio en escala 1-5 · franjas de fondo = niveles de riesgo · desplázate con la barra inferior</p>
+                    <div class="mc-leyenda" id="camel-leyenda"></div>
+                    <div class="mc-graf-wrap"><div class="mc-eje" id="camel-eje"></div>
+                    <div class="mc-graf-scroll" id="camel-graf-scroll"><div class="mc-graf-inner" id="camel-graf-inner"><canvas id="chartCAMEL"></canvas></div></div></div>
+                </div>
+            </div>
+            <div class="section mc-blanco">
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Calificación por Indicador</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarTablaMC('camel')" title="Copiar este cuadro"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                </div>
+                <p class="seccion-subtitulo" id="camel-tabla-sub">—</p>
+                <div class="solv-resumen-wrap"><table class="solv-resumen-tabla mc-tabla-ancha" id="camel-tabla"></table></div>
+            </div>
+            <div class="section mc-blanco">
+                <h2 class="section-title">Puntajes de los Últimos 13 Meses</h2>
+                <p class="seccion-subtitulo">1 = mejor · 5 = peor · el color sigue los niveles definidos en parametros.xlsx</p>
+                <div class="solv-resumen-wrap"><table class="solv-resumen-tabla mc-hist" id="camel-hist"></table></div>
+            </div>
+            <div class="section mc-blanco">
+                <div class="eeff-titulo-fila">
+                    <h2 class="section-title">Tablero Histórico de Indicadores · CAMEL</h2>
+                    <button class="eeff-btn-copiar" onclick="copiarTableroMC('camel')" title="Copiar el tablero"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                </div>
+                <p class="seccion-subtitulo">Resultados de cada mes · usa la lupa para ver la gráfica histórica del indicador · desplázate con la barra inferior</p>
+                <div class="mc-graf-scroll mc-tablero-wrap"><table class="solv-resumen-tabla mc-tablero" id="camel-tablero"></table></div>
+            </div>
+        </div>
+
         <!-- ========== MÓDULO: MARGEN DE RESISTENCIA ========== -->
         <div class="container oculto" id="margen-resistencia-root">
             <header class="header">
@@ -10775,6 +11656,60 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </div>
         </div>
         
+        <!-- ========== MÓDULO: CARTERA Y PROVISIÓN ========== -->
+        <div class="container oculto" id="cartera-provision-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion btn-volver-activo" onclick="volverAlSubmenuActivoDesdeCarteraProvision()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Activo</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#1E7F73;">Cartera y Provisión</h1>
+                    <div class="subtitle">Cartera de créditos con pérdida esperada por categoría</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="cp-filtro-anio">Año</label><select id="cp-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="cp-filtro-mes">Mes</label><select id="cp-filtro-mes"></select></div>
+                    </div>
+                    <div class="filtros cp-filtros-cmp">
+                        <span class="cp-vs">vs</span>
+                        <div class="filtro-card"><label for="cp-cmp-anio">Año</label><select id="cp-cmp-anio"></select></div>
+                        <div class="filtro-card"><label for="cp-cmp-mes">Mes</label><select id="cp-cmp-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="_xBoton(this, descargarExcelCarteraProvision)" title="Descargar comparativo, indicadores, cuentas e histórico en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="cp-chips">
+                <span class="cp-chips-lbl">Comparar con</span>
+                <button class="cp-chip" data-modo="mes" onclick="compararCarteraProvision('mes')">Mes anterior</button>
+                <button class="cp-chip" data-modo="anio" onclick="compararCarteraProvision('anio')">Mismo mes del año anterior</button>
+                <button class="cp-chip" data-modo="dic" onclick="compararCarteraProvision('dic')">Cierre del año anterior</button>
+                <button class="cp-chip" data-modo="libre" disabled>Otro período (filtros vs)</button>
+            </div>
+            <div class="cp-kpis" id="cp-kpis"></div>
+            <div class="section mc-blanco">
+                <h2 class="section-title">Cartera de Créditos Total con Pérdida Esperada</h2>
+                <p class="seccion-subtitulo" id="cp-sub-tabla">—</p>
+                <div class="cp-tabla-wrap"><table class="cp-tabla" id="cp-tabla"></table></div>
+            </div>
+            <div class="cp-dos">
+                <div class="section mc-blanco">
+                    <h2 class="section-title">Indicadores de Calidad y Cubrimiento</h2>
+                    <p class="seccion-subtitulo">Índices en porcentaje · montos en millones · variación de índices en puntos porcentuales</p>
+                    <div class="cp-tabla-wrap"><table class="cp-tabla cp-ind" id="cp-indicadores"></table></div>
+                </div>
+                <div class="section mc-blanco">
+                    <h2 class="section-title">Composición por Categoría</h2>
+                    <p class="seccion-subtitulo">Participación de cada categoría en la cartera bruta y cartera en riesgo (B a E)</p>
+                    <div class="cp-composicion" id="cp-composicion"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== MÓDULO: CARTERA SOBRE ACTIVO (Cartera / 1) ========== -->
         <div class="container oculto" id="cartera-activo-root">
             <header class="header">
@@ -12011,6 +12946,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const DATOS_CARTERA_SEGMENTOS = {json.dumps(cartera_segmentos, default=_json_default, ensure_ascii=False)};
         // ===== ESTADOS FINANCIEROS MENSUALES (E.S.F. y E.R.I.) =====
         const DATOS_EEFF = {json.dumps(estados_financieros, default=_json_default, ensure_ascii=False)};
+        // ===== MODELOS MAT Y CAMEL (parámetros versionados) =====
+        const DATOS_MATCAMEL = {json.dumps(mat_camel, default=_json_default, ensure_ascii=False)};
+        const PARAMETROS_MC = {json.dumps(parametros_mc or {}, default=_json_default, ensure_ascii=False)};
+        const DATOS_CARTERA_PROV = {json.dumps(cartera_provision or [], default=_json_default, ensure_ascii=False)};
 
         // ===== SERIES DE COMPOSICIÓN (Numerador / Denominador) =====
         const SERIE_SOLVENCIA_NUM = {json.dumps(serie_solvencia_num, default=_json_default)};
@@ -12049,7 +12988,1223 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         if (window.ChartDataLabels) {{
             Chart.register(ChartDataLabels);
         }}
+
+        // ===== HERRAMIENTAS COMUNES DE LOS GRÁFICOS: «Copiar imagen» y «Colores» =====
+        // Se agregan solas a todo gráfico del dashboard (plugin global de Chart.js).
+        const HG_PROPIA = 'Colores propios del gráfico';
+        const HG_PALCAL = ['#00b050', '#ffff00', '#ffc000', '#ff0000', '#c00000'];
+        const HG_PALS = [[HG_PROPIA, null], ['Calificación A a E', HG_PALCAL],
+            ['Riesgo', ['#7cb342', '#fb8c00', '#c62828', '#6d4c41', '#455a64', '#00838f', '#ad1457', '#283593']],
+            ['Corporativa', ['#1f4e79', '#2a9d8f', '#e9a23b', '#c8553d', '#6d597a', '#4f86c6', '#8ab17d', '#b56576']],
+            ['Azules', ['#0b3c5d', '#1f6fa8', '#4fa3d9', '#93c9ee', '#f2a541', '#5c677d', '#2a9d8f', '#b0bec5']],
+            ['Océano', ['#0b7285', '#1098ad', '#3bc9db', '#f08c00', '#495057', '#5f3dc4', '#2f9e44', '#e8590c']],
+            ['Tierra', ['#8d6e63', '#d4a373', '#588157', '#bc4749', '#3a5a40', '#6d597a', '#a98467', '#40513b']],
+            ['Vino y arena', ['#7b1e3a', '#c9a227', '#2f4858', '#b56576', '#6d6875', '#355070', '#e5989b', '#8a5a44']],
+            ['Grises con acento', ['#343a40', '#868e96', '#e03131', '#adb5bd', '#1971c2', '#f08c00', '#495057', '#2f9e44']],
+            ['Viva', ['#5b6cff', '#12c2b0', '#ffb020', '#ff5c9d', '#a855f7', '#38bdf8', '#ff7a59', '#7be495']],
+            ['Círculo cromático', ['#e6194b', '#f58231', '#ffd400', '#7ac70c', '#12b886', '#1c9be6', '#4f46e5', '#a21caf']],
+            ['Atardecer', ['#ff8a00', '#f0437a', '#7b1fa2', '#ffb74d', '#c2185b', '#e65100', '#ad1457', '#4a148c']],
+            ['Tropical', ['#2ec4b6', '#e9c46a', '#e76f51', '#118ab2', '#f4a261', '#2a9d8f', '#ef476f', '#ffd166']],
+            ['Aurora', ['#00c6ff', '#7b61ff', '#e91e9c', '#00e0b8', '#3f51b5', '#ff5fa2', '#0072ff', '#b388ff']],
+            ['Fucsia y cielo', ['#ec407a', '#42a5f5', '#ab47bc', '#26c6da', '#f06292', '#1e88e5', '#8e24aa', '#80deea']],
+            ['Cítrica', ['#f9d423', '#56ab2f', '#ff9f1c', '#a8e063', '#e8c400', '#2e7d32', '#ffb703', '#7cb342']],
+            ['Pastel', ['#8ecae6', '#ffb5c2', '#b8e0d2', '#f6d186', '#c3aed6', '#a0c4ff', '#ffc09f', '#95d5b2']],
+            ['Marino profundo', ['#0b3d91', '#00a8cc', '#1565c0', '#26c6da', '#283593', '#4dd0e1', '#0277bd', '#5c6bc0']],
+            ['Fuego', ['#b71c1c', '#ff7043', '#ffb300', '#e53935', '#8e0000', '#f4511e', '#ffd54f', '#ff8a65']],
+            ['Violetas', ['#6a1b9a', '#e040fb', '#c2185b', '#8e44ad', '#4a148c', '#f06292', '#ab47bc', '#7e57c2']]];
+        const HG_MUESTRA_PROPIA = ['#1f4e79', '#2a9d8f', '#e9a23b', '#c8553d', '#6d597a', '#4f86c6'];
+        let HG_SEL = {{}};
+        try {{ HG_SEL = JSON.parse(localStorage.getItem('indfin_paletas') || '{{}}') || {{}}; }} catch (e) {{ HG_SEL = {{}}; }}
+        const _hgGuardar = () => {{ try {{ localStorage.setItem('indfin_paletas', JSON.stringify(HG_SEL)); }} catch (e) {{}} }};
+        const _hgNombre = id => HG_SEL[id] || HG_SEL['*'] || HG_PROPIA;
+        const _hgPaleta = id => {{ const x = HG_PALS.find(q => q[0] === _hgNombre(id)); return x ? x[1] : null; }};
+        const HG_ICO_COPIA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+        const HG_ICO_PAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-.6-.3-1-.6-1.4-.3-.4-.5-.8-.5-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.1-4-7.5-9-7.5z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>';
+        const HG_MESES = {{Ene: 'Enero', Feb: 'Febrero', Mar: 'Marzo', Abr: 'Abril', May: 'Mayo', Jun: 'Junio', Jul: 'Julio',
+                          Ago: 'Agosto', Sep: 'Septiembre', Oct: 'Octubre', Nov: 'Noviembre', Dic: 'Diciembre'}};
+        const HG_HOST = '.section, .dep-mini-card, .icg-anual-card, .mc-modal-caja, .eeff-modal-caja, [role="dialog"]';
+        let HG_N = 0;
+
+        // ---------- Colores ----------
+        function _hgRgb(c) {{
+            if (typeof c !== 'string') return null;
+            c = c.trim(); let m;
+            if ((m = c.match(/^#([0-9a-f]{{3}})$/i))) c = '#' + m[1].split('').map(x => x + x).join('');
+            if ((m = c.match(/^#([0-9a-f]{{6}})([0-9a-f]{{2}})?$/i)))
+                return {{ r: parseInt(m[1].slice(0, 2), 16), g: parseInt(m[1].slice(2, 4), 16), b: parseInt(m[1].slice(4, 6), 16),
+                         a: m[2] ? parseInt(m[2], 16) / 255 : 1 }};
+            if ((m = c.match(/^rgba?\\(\\s*([\\d.]+)[\\s,]+([\\d.]+)[\\s,]+([\\d.]+)(?:[\\s,\\/]+([\\d.]+%?))?\\s*\\)$/i)))
+                return {{ r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4])) }};
+            return null;
+        }}
+        const _hgHex = o => '#' + [o.r, o.g, o.b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+        const _hgNeutro = o => Math.max(o.r, o.g, o.b) - Math.min(o.r, o.g, o.b) < 30;   // blancos, grises y casi negros se conservan
+        function _hgMapeador(pl) {{
+            const memo = new Map();
+            const destino = hex => {{ if (!memo.has(hex)) memo.set(hex, pl[memo.size % pl.length]); return memo.get(hex); }};
+            const f = c => {{
+                const o = _hgRgb(c);
+                if (!o || _hgNeutro(o)) return c;
+                const d = _hgRgb(destino(_hgHex(o)));
+                return o.a >= 0.999 ? _hgHex(d) : `rgba(${{d.r}},${{d.g}},${{d.b}},${{+o.a.toFixed(3)}})`;
+            }};
+            f.destino = destino;
+            return f;
+        }}
+        const HG_PROPS = ['borderColor', 'backgroundColor', 'pointBackgroundColor', 'pointBorderColor', 'pointHoverBackgroundColor',
+                          'pointHoverBorderColor', 'hoverBackgroundColor', 'hoverBorderColor'];
+        const HG_PROPS_ET = ['color', 'borderColor', 'backgroundColor'];
+        function _hgPrimero(v) {{
+            const ok = x => typeof x === 'string' && _hgRgb(x) && !_hgNeutro(_hgRgb(x));
+            if (ok(v)) return v;
+            if (Array.isArray(v)) return v.find(ok) || null;
+            return null;
+        }}
+        function _hgConv(v, map, principal, tipo) {{
+            const uno = (x, ctx) => {{
+                if (typeof x === 'string') return map(x);
+                if (x && typeof x === 'object' && !Array.isArray(x) && ctx && ctx.chart && principal)   // degradado del gráfico original
+                    return tipo === 'line' ? gradienteArea(ctx, principal)
+                                           : gradienteArea(ctx, principal, {{ topAlpha: 0.95, midAlpha: 0.8, botAlpha: 0.6 }});
+                return x;
+            }};
+            if (typeof v === 'function') return function (ctx, o) {{ return uno(v.call(this, ctx, o), ctx); }};
+            if (Array.isArray(v)) return v.map(x => uno(x));
+            return uno(v);
+        }}
+        const _hgOscuro = (hex, t) => {{ const o = _hgRgb(hex); return _hgHex({{ r: o.r * (1 - t), g: o.g * (1 - t), b: o.b * (1 - t) }}); }};
+        function _hgConvEt(v, colorDe, esTexto) {{
+            const uno = (x, ctx) => {{
+                if (typeof x !== 'string') return x;
+                const o = _hgRgb(x);
+                if (!o || _hgNeutro(o)) return x;
+                let c = colorDe(ctx);
+                if (esTexto) c = _hgOscuro(c, 0.3);
+                const d = _hgRgb(c);
+                return o.a >= 0.999 ? c : `rgba(${{d.r}},${{d.g}},${{d.b}},${{+o.a.toFixed(3)}})`;
+            }};
+            if (typeof v === 'function') return function (ctx, o) {{ return uno(v.call(this, ctx, o), ctx); }};
+            if (Array.isArray(v)) return v.map(x => uno(x));
+            return uno(v);
+        }}
+        // Guarda los colores originales (y los vuelve a tomar si el gráfico los cambió) y aplica la combinación elegida
+        function _hgCapturar(obj, props, kO, kS) {{
+            if (!obj || typeof obj !== 'object') return;
+            if (!obj[kO]) {{ obj[kO] = {{}}; obj[kS] = {{}}; }}
+            props.forEach(p => {{
+                if (!(p in obj)) return;
+                if (!(p in obj[kO]) || obj[p] !== obj[kS][p]) obj[kO][p] = obj[p];
+            }});
+        }}
+        function _hgAplicar(chart) {{
+            const id = chart.canvas.id, pl = _hgPaleta(id), tipoG = chart.config.type, sets = chart.data.datasets;
+            const opts = chart.config.options || {{}};
+            let dl = opts.plugins && opts.plugins.datalabels;
+            if (dl && typeof dl === 'object') {{ if (dl.__hgDue && dl.__hgDue !== chart.id) dl = null; else dl.__hgDue = chart.id; }}
+            else dl = null;
+            sets.forEach(ds => {{ _hgCapturar(ds, HG_PROPS, '__hgO', '__hgS'); _hgCapturar(ds.datalabels, HG_PROPS_ET, '__hgO', '__hgS'); }});
+            _hgCapturar(dl, HG_PROPS_ET, '__hgO', '__hgS');
+            const poner = (obj, p, v) => {{ obj[p] = v; obj.__hgS[p] = v; }};
+            if (!pl) {{
+                sets.forEach(ds => {{
+                    Object.keys(ds.__hgO).forEach(p => poner(ds, p, ds.__hgO[p]));
+                    if (ds.datalabels && ds.datalabels.__hgO) Object.keys(ds.datalabels.__hgO).forEach(p => poner(ds.datalabels, p, ds.datalabels.__hgO[p]));
+                }});
+                if (dl) Object.keys(dl.__hgO).forEach(p => poner(dl, p, dl.__hgO[p]));
+                return;
+            }}
+            const map = _hgMapeador(pl);
+            const prin = sets.map((ds, i) => {{
+                const c = _hgPrimero(ds.__hgO.borderColor) || _hgPrimero(ds.__hgO.backgroundColor);
+                return c ? map.destino(_hgHex(_hgRgb(c))) : pl[i % pl.length];
+            }});
+            sets.forEach((ds, i) => {{
+                const t = ds.type || tipoG;
+                Object.keys(ds.__hgO).forEach(p => poner(ds, p, _hgConv(ds.__hgO[p], map, prin[i], t)));
+                if (ds.datalabels && ds.datalabels.__hgO)
+                    Object.keys(ds.datalabels.__hgO).forEach(p => poner(ds.datalabels, p, _hgConvEt(ds.datalabels.__hgO[p], () => prin[i], p === 'color')));
+            }});
+            const deCtx = ctx => prin[(ctx && ctx.datasetIndex) || 0] || prin[0];
+            if (dl) Object.keys(dl.__hgO).forEach(p => poner(dl, p, _hgConvEt(dl.__hgO[p], deCtx, p === 'color')));
+        }}
+        function _hgRepintar(id) {{
+            const ch = Chart.getChart(id);
+            if (ch) {{ _hgAplicar(ch); ch.update(); }}
+            document.querySelectorAll(`.gbar[data-hg="${{id}}"] .gpi`).forEach(x => x.classList.toggle('act', x.dataset.n === _hgNombre(id)));
+        }}
+        function _hgRepintarTodos() {{
+            document.querySelectorAll('.gbar[data-hg]').forEach(g => _hgRepintar(g.dataset.hg));
+        }}
+
+        // ---------- Barra de botones ----------
+        function _hgBarra(chart) {{
+            const cv = chart.canvas, id = cv.id;
+            if (document.querySelector(`.gbar[data-hg="${{id}}"]`)) return;
+            let w = cv;
+            while (w.parentElement && !w.parentElement.matches(HG_HOST)) w = w.parentElement;
+            const host = w.parentElement;
+            const slot = document.querySelector(`[data-hg-slot="${{id}}"]`);
+            if (!host && !slot) return;
+            const act = _hgNombre(id);
+            const div = document.createElement('div');
+            div.className = 'gbar'; div.dataset.hg = id;
+            div.innerHTML = `<div class="gp gc"><button type="button" title="Copiar este gráfico como imagen">${{HG_ICO_COPIA}}<span>Copiar imagen</span></button>`
+                + `<div class="gpop gcp"><button type="button" data-v="1">Solo lo que se ve</button><button type="button" data-v="6" class="gcu">Últimos 6 meses</button>`
+                + `<button type="button" data-v="13" class="gcu">Últimos 13 meses</button><button type="button" data-v="0">Todo el gráfico</button></div></div>`
+                + `<div class="gp gq"><button type="button" title="Combinación de colores de este gráfico">${{HG_ICO_PAL}}<span>Colores</span></button><div class="gpop">`
+                + HG_PALS.map(q => `<div class="gpi${{q[0] === act ? ' act' : ''}}" data-n="${{q[0]}}"><span class="gsw">${{(q[1] || HG_MUESTRA_PROPIA).slice(0, 6).map(c => `<i style="background:${{c}}"></i>`).join('')}}</span><span class="gnm">${{q[0]}}</span></div>`).join('')
+                + `<div class="gtd"><button type="button" data-t="1">Usar la marcada en todos los gráficos</button><button type="button" data-t="0">Restablecer todos</button></div></div></div>`;
+            if (slot) slot.appendChild(div);
+            else {{
+                const prev = w.previousElementSibling;
+                if (host.matches('.section') && prev && prev.matches('h2.section-title') && host.querySelectorAll('canvas').length === 1) {{
+                    div.classList.add('gbar-flota'); host.classList.add('hg-rel');
+                }}
+                host.insertBefore(div, w);
+            }}
+            const gc = div.querySelector('.gc'), bc = gc.querySelector(':scope > button');
+            const cerrarOtros = yo => document.querySelectorAll('.gp.ab').forEach(x => x !== yo && x.classList.remove('ab'));
+            bc.onclick = e => {{
+                e.stopPropagation();
+                const ch = Chart.getChart(id); if (!ch) return;
+                const info = _hgInfo(ch);
+                gc.querySelectorAll('.gcu').forEach(o => o.style.display = info.temporal && info.n > +o.dataset.v ? '' : 'none');
+                gc.querySelector('[data-v="1"]').style.display = info.desplaza ? '' : 'none';
+                if (info.desplaza || (info.temporal && info.n > 6)) {{ cerrarOtros(gc); gc.classList.toggle('ab'); }}
+                else _hgCopiar(id, '0', bc);
+            }};
+            gc.querySelectorAll('.gcp button').forEach(o => o.onclick = e => {{ e.stopPropagation(); gc.classList.remove('ab'); _hgCopiar(id, o.dataset.v, bc); }});
+            const gq = div.querySelector('.gq');
+            gq.querySelector(':scope > button').onclick = e => {{ e.stopPropagation(); cerrarOtros(gq); gq.classList.toggle('ab'); }};
+            gq.querySelector('.gpop').onclick = e => e.stopPropagation();
+            gq.querySelectorAll('.gpi').forEach(x => x.onclick = () => {{
+                if (x.dataset.n === HG_PROPIA && !HG_SEL['*']) delete HG_SEL[id]; else HG_SEL[id] = x.dataset.n;
+                _hgGuardar(); _hgRepintar(id);
+            }});
+            gq.querySelectorAll('.gtd button').forEach(x => x.onclick = () => {{
+                if (x.dataset.t === '1') {{ const n = _hgNombre(id); HG_SEL = n && n !== HG_PROPIA ? {{ '*': n }} : {{}}; }}
+                else HG_SEL = {{}};
+                _hgGuardar(); _hgRepintarTodos();
+            }});
+        }}
+        document.addEventListener('click', e => {{ if (!e.target.closest || !e.target.closest('.gp')) document.querySelectorAll('.gp.ab').forEach(x => x.classList.remove('ab')); }});
+
+        // ---------- Datos del gráfico para copiar ----------
+        function _hgInfo(ch) {{
+            const cv = ch.canvas, labels = ch.data.labels || [], n = labels.length;
+            const temporal = n > 1 && ch.options.indexAxis !== 'y' && /^[A-Za-zÁÉÍÓÚáéíóú]{{3}}-\\d{{2}}$/.test(String(labels[0]));
+            let scroll = null;
+            for (let e = cv.parentElement; e && !e.matches(HG_HOST); e = e.parentElement) {{
+                const ox = getComputedStyle(e).overflowX;
+                if (ox === 'auto' || ox === 'scroll') {{ scroll = e; break; }}
+            }}
+            const desplaza = !!(temporal && scroll && scroll.scrollWidth > scroll.clientWidth + 2);
+            let visible = null;
+            if (desplaza && ch.scales.x) {{
+                const cr = cv.getBoundingClientRect(), sr = scroll.getBoundingClientRect();
+                const x0 = sr.left - cr.left, x1 = x0 + scroll.clientWidth;
+                const dentro = [...Array(n).keys()].filter(i => {{ const p = ch.scales.x.getPixelForValue(i); return p >= x0 && p <= x1; }});
+                if (dentro.length) visible = [dentro[0], dentro[dentro.length - 1]];
+            }}
+            // Mes elegido en los filtros del módulo (si no, el último del gráfico)
+            let actual = n - 1;
+            const root = cv.closest('[id$="-root"]');
+            const sa = root && root.querySelector('select[id$="filtro-anio"]'), sm = root && root.querySelector('select[id$="filtro-mes"]');
+            if (sa && sm && sm.selectedOptions[0]) {{
+                const k = labels.indexOf(`${{sm.selectedOptions[0].text.trim().slice(0, 3)}}-${{String(sa.value).slice(-2)}}`);
+                if (k >= 0) actual = k;
+            }}
+            return {{ n, labels, temporal, scroll, desplaza, visible, actual }};
+        }}
+        const _hgLarga = e => {{ const m = String(e).match(/^(\\w{{3}})-(\\d{{2}})$/); return m && HG_MESES[m[1]] ? `${{HG_MESES[m[1]]}} 20${{m[2]}}` : String(e); }};
+        const _hgTexto = el => el ? el.textContent.replace(/\\s+/g, ' ').trim() : '';
+        function _hgTitulos(cv) {{
+            let w = cv; while (w.parentElement && !w.parentElement.matches(HG_HOST)) w = w.parentElement;
+            const host = w.parentElement || cv.parentElement;
+            const buscar = h => {{ for (const s of ['.section-title', 'h2', 'h3', 'h4', '[class*="titulo"]']) {{ const e = h && h.querySelector(s); if (e && _hgTexto(e)) return _hgTexto(e); }} return ''; }};
+            let titulo = buscar(host);
+            const sec = host.parentElement && host.parentElement.closest('.section');
+            if (sec && !host.matches('.section')) {{ const t = buscar(sec); if (t && t !== titulo) titulo = titulo ? `${{t}} · ${{titulo}}` : t; }}
+            const root = cv.closest('[id$="-root"]');
+            const h1 = root && root.querySelector('h1');
+            return {{ titulo: titulo || 'Gráfico', modulo: _hgTexto(h1), acento: (h1 && getComputedStyle(h1).color) || '#1E7F73' }};
+        }}
+        function _hgLeyenda(ch) {{
+            const sets = ch.data.datasets;
+            if (sets.length < 2) return [];
+            return sets.map((ds, i) => {{
+                if (!ds.label || !ch.isDatasetVisible(i)) return null;
+                const el = (ch.getDatasetMeta(i).data || []).slice(-1)[0];
+                const o = el && el.options;
+                let c = o && [o.backgroundColor, o.borderColor].find(x => typeof x === 'string' && _hgRgb(x) && !_hgNeutro(_hgRgb(x)));
+                c = c || _hgPrimero(ds.borderColor) || _hgPrimero(ds.backgroundColor) || '#94a3b8';
+                const rgb = _hgRgb(c);
+                return {{ nivel: ds.label, color: rgb ? _hgHex(rgb) : c }};
+            }}).filter(Boolean);
+        }}
+
+        // ---------- Copiar imagen (1 = lo que se ve · 6 / 13 = últimos meses · 0 = todo) ----------
+        async function _hgCopiar(id, v, btn) {{
+            const tx = btn.querySelector('span'), t0 = 'Copiar imagen';
+            const di = m => {{ tx.textContent = m; setTimeout(() => tx.textContent = t0, 1800); }};
+            let c2 = null;
+            try {{
+                const ch = Chart.getChart(id); if (!ch) return;
+                if (document.fonts && document.fonts.ready) await document.fonts.ready;
+                const info = _hgInfo(ch), n = info.n;
+                let a = 0, b = n - 1;
+                if (info.temporal) {{
+                    if (v === '1' && info.visible) [a, b] = info.visible;
+                    else if (v === '6' || v === '13') {{ b = info.actual; a = Math.max(0, b - (+v) + 1); }}
+                }}
+                const area = ch.chartArea || {{ left: 0, width: ch.width }};
+                const paso = info.temporal ? Math.max(64, area.width / n) : 0;
+                const H = Math.max(300, Math.round(ch.height));
+                const W = info.temporal ? Math.round(paso * n + 110) : Math.max(560, Math.round(ch.width));
+                const o = ch.config.options || {{}};
+                const T = _hgTitulos(ch.canvas);
+                // eje vertical: en pantalla está fuera del desplazamiento; en la imagen se dibuja dentro
+                const sc = {{ ...(o.scales || {{}}) }};
+                const ejeFuera = !!document.querySelector(`.gbar[data-hg="${{id}}"]`) && !!(ch.canvas.closest('.historico-flex-wrap, .mc-graf-wrap'));
+                if (sc.y && info.temporal && ejeFuera)
+                    sc.y = {{ ...sc.y, display: true, ticks: {{ ...(sc.y.ticks || {{}}), display: true }}, border: {{ display: false }} }};
+                const pl = {{ ...(o.plugins || {{}}) }};
+                Object.keys(pl).forEach(k => {{ if (pl[k] && typeof pl[k] === 'object' && 'ejeId' in pl[k]) pl[k] = {{ ...pl[k], ejeId: null }}; }});
+                const temp = document.createElement('canvas'); temp.width = W; temp.height = H;
+                c2 = new Chart(temp, {{
+                    type: ch.config.type,
+                    data: {{ labels: [...ch.data.labels], datasets: ch.data.datasets.map((d, i) => ({{ ...d, data: [...d.data], hidden: !ch.isDatasetVisible(i) }})) }},
+                    options: {{ ...o, plugins: pl, scales: sc, responsive: false, maintainAspectRatio: false, animation: false,
+                               devicePixelRatio: 2, onClick: undefined, onHover: undefined }},
+                    plugins: ch.config.plugins
+                }});
+                const r = c2.canvas.width / W;
+                let x0 = 0, x1 = W, eje = 0;
+                if (info.temporal && (a > 0 || b < n - 1)) {{
+                    const xs = c2.scales.x, med = (xs.getPixelForValue(1) - xs.getPixelForValue(0)) / 2;
+                    eje = a === 0 ? 0 : c2.chartArea.left;
+                    x0 = a === 0 ? 0 : xs.getPixelForValue(a) - med;
+                    x1 = b === n - 1 ? W : xs.getPixelForValue(b) + med;
+                }}
+                const ancho = Math.round(eje + (x1 - x0));
+                const sub = info.temporal
+                    ? `${{{{ '1': 'Lo que se ve', '6': 'Últimos 6 meses', '13': 'Últimos 13 meses', '0': 'Todo el gráfico' }}[v] || ''}} · ${{_hgLarga(info.labels[a])}} a ${{_hgLarga(info.labels[b])}}`
+                    : '';
+                const subtitulo = [T.modulo, sub].filter(Boolean).join(' · ');
+                const L = _lienzoCopiaMC(T.titulo, subtitulo, _hgLeyenda(ch), ancho, H, T.acento);
+                if (eje) L.g.drawImage(c2.canvas, 0, 0, eje * r, H * r, L.x, L.y, eje, H);
+                L.g.drawImage(c2.canvas, x0 * r, 0, (x1 - x0) * r, H * r, L.x + eje, L.y, x1 - x0, H);
+                c2.destroy(); c2 = null;
+                const blob = await new Promise(res => L.cv.toBlob(res, 'image/png'));
+                try {{ await navigator.clipboard.write([new ClipboardItem({{ 'image/png': blob }})]); di('Copiada ✓'); }}
+                catch (e) {{ saveAs(blob, T.titulo.replace(/[^\\wáéíóúñÁÉÍÓÚÑ ]+/g, ' ').trim().replace(/\\s+/g, '_') + '.png'); di('Descargada ✓'); }}
+            }} catch (e) {{ console.error(e); if (c2) c2.destroy(); di('No se pudo'); }}
+        }}
+
+        Chart.register({{
+            id: 'herramientasHG',
+            afterInit(chart) {{
+                try {{
+                    const cv = chart.canvas;
+                    if (!cv || !cv.isConnected) return;
+                    if (!cv.id) cv.id = 'hgcv' + (++HG_N);
+                    _hgBarra(chart);
+                }} catch (e) {{ console.error(e); }}
+            }},
+            beforeUpdate(chart) {{
+                try {{ if (chart.canvas && chart.canvas.isConnected) _hgAplicar(chart); }} catch (e) {{ console.error(e); }}
+            }}
+        }});
         
+
+        // ===== COPIAR TABLAS (imagen, Excel o PNG) con rango de meses =====
+        // Cada sección con tablas recibe «Copiar tabla»; en las tablas con histórico se elige el rango.
+        const TC_MES_FILA = /^(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)\\s+\\d{{4}}$/i;
+        const TC_MES_COL = /^(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Agos|Sep|Sept|Oct|Nov|Dic)\\.?(\\s*\\d{{2,4}})?$/i;
+        const TC_EXCLUIR = '#mat-root, #camel-root, .eeff-modal, #copia-modal, .mc-modal, .gpop';
+        let TC_N = 0;
+        // Cuadrícula real de la tabla (respeta colspan y rowspan)
+        function _tcGrid(t) {{
+            const ocup = [], celdas = [];
+            [...t.rows].forEach((tr, i) => {{
+                ocup[i] = ocup[i] || [];
+                let c = 0;
+                [...tr.cells].forEach(td => {{
+                    while (ocup[i][c]) c++;
+                    celdas.push({{ td, fila: i, col: c, cs: td.colSpan || 1 }});
+                    for (let a = 0; a < (td.rowSpan || 1); a++) for (let b = 0; b < (td.colSpan || 1); b++) {{
+                        ocup[i + a] = ocup[i + a] || []; ocup[i + a][c + b] = true;
+                    }}
+                    c += td.colSpan || 1;
+                }});
+            }});
+            return celdas;
+        }}
+        function _tcAnalizar(t) {{
+            const filas = [...t.rows], celdas = _tcGrid(t);
+            const txt = el => el.textContent.replace(/\\s+/g, ' ').trim();
+            const mesesFila = filas.map((tr, i) => tr.cells[0] && TC_MES_FILA.test(txt(tr.cells[0])) ? i : -1).filter(i => i >= 0);
+            if (mesesFila.length >= 6) return {{ tipo: 'filas', idx: mesesFila, etq: mesesFila.map(i => txt(filas[i].cells[0])) }};
+            const cab = celdas.filter(c => c.fila === 0 && c.cs === 1 && TC_MES_COL.test(txt(c.td)));
+            if (cab.length >= 6) return {{ tipo: 'columnas', idx: cab.map(c => c.col), celdas, cab }};
+            return {{ tipo: 'fija' }};
+        }}
+        function _tcScroll(el, host) {{
+            for (let e = el.parentElement; e && e !== host.parentElement; e = e.parentElement) {{
+                const s = getComputedStyle(e);
+                if (((s.overflowX === 'auto' || s.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 2) ||
+                    ((s.overflowY === 'auto' || s.overflowY === 'scroll') && e.scrollHeight > e.clientHeight + 2)) return e;
+            }}
+            return null;
+        }}
+        // Índices (de filas o columnas) que entran en el rango elegido
+        function _tcElegidos(t, info, rango, host) {{
+            const n = info.idx.length, todos = info.idx.map((_, k) => k);
+            let pos = todos;
+            if (rango === 'visible') {{
+                const sc = _tcScroll(t, host);
+                if (sc) {{
+                    const r = sc.getBoundingClientRect();
+                    const fija = info.tipo === 'columnas' && t.rows[0].cells[0] ? t.rows[0].cells[0].getBoundingClientRect().width : 0;
+                    pos = todos.filter(k => {{
+                        const el = info.tipo === 'filas' ? t.rows[info.idx[k]] : info.cab[k].td;
+                        const b = el.getBoundingClientRect();
+                        return info.tipo === 'filas' ? (b.bottom > r.top + 2 && b.top < r.bottom - 2)
+                                                     : (b.right > r.left + fija + 2 && b.left < r.right - 2);
+                    }});
+                    if (!pos.length) pos = todos;
+                }}
+            }} else if (rango === '6' || rango === '13') {{
+                let fin = n - 1;
+                if (info.tipo === 'filas') {{   // termina en el mes elegido en los filtros, si está en la tabla
+                    const root = t.closest('[id$="-root"]');
+                    const sa = root && root.querySelector('select[id$="filtro-anio"]'), sm = root && root.querySelector('select[id$="filtro-mes"]');
+                    if (sa && sm && sm.selectedOptions[0]) {{
+                        const k = info.etq.findIndex(e => e.toLowerCase() === `${{sm.selectedOptions[0].text.trim()}} ${{sa.value}}`.toLowerCase());
+                        if (k >= 0) fin = k;
+                    }}
+                }}
+                const ini = Math.max(0, fin - (+rango) + 1);
+                pos = todos.filter(k => k >= ini && k <= fin);
+            }}
+            return new Set(pos.map(k => info.idx[k]));
+        }}
+        // Copia de la tabla con estilos en línea, solo con las filas/columnas del rango
+        const TC_PROPS = ['font-family', 'font-size', 'font-weight', 'font-style', 'color', 'background-color', 'text-align', 'vertical-align',
+                          'white-space', 'line-height', 'letter-spacing', 'text-transform', 'padding-top', 'padding-right', 'padding-bottom',
+                          'padding-left', 'border-top', 'border-right', 'border-bottom', 'border-left', 'border-collapse', 'border-spacing'];
+        function _tcClonar(t, info, elegidos) {{
+            const cl = t.cloneNode(true);
+            const orig = [t, ...t.querySelectorAll('*')], copia = [cl, ...cl.querySelectorAll('*')];
+            copia.forEach((e, i) => {{
+                const cs = getComputedStyle(orig[i]);
+                let st = TC_PROPS.map(p => `${{p}}:${{cs.getPropertyValue(p)}}`).join(';');
+                if (cs.display === 'none') st += ';display:none';
+                if (e.tagName === 'TABLE') st += ';width:auto;margin:0';
+                e.setAttribute('style', st + ';position:static');
+                e.removeAttribute('class'); e.removeAttribute('id');
+            }});
+            cl.querySelectorAll('button, .gbar, input, select').forEach(e => e.remove());
+            if (info.tipo === 'filas') {{
+                info.idx.forEach(i => {{ if (!elegidos.has(i)) cl.rows[i].setAttribute('data-quitar', '1'); }});
+                cl.querySelectorAll('[data-quitar]').forEach(e => e.remove());
+            }} else if (info.tipo === 'columnas') {{
+                const meses = new Set(info.idx);
+                const celdasCl = _tcGrid(cl);
+                celdasCl.forEach(c => {{
+                    let quedan = 0;
+                    for (let b = 0; b < c.cs; b++) {{ const col = c.col + b; if (!meses.has(col) || elegidos.has(col)) quedan++; }}
+                    if (!quedan) c.td.setAttribute('data-quitar', '1');
+                    else if (c.cs > 1) c.td.colSpan = quedan;
+                }});
+                cl.querySelectorAll('[data-quitar]').forEach(e => e.remove());
+            }}
+            return cl;
+        }}
+        function _tcTituloTabla(t, host) {{
+            for (let e = t; e && e !== host; e = e.parentElement) {{
+                for (let p = e.previousElementSibling; p; p = p.previousElementSibling) {{
+                    if (p.matches('.gbar')) continue;
+                    const h = p.matches('h2, h3, h4, [class*="titulo"]') ? p : p.querySelector('h3, h4, [class*="titulo"]');
+                    if (h && h.textContent.trim()) return h.textContent.replace(/\\s+/g, ' ').trim();
+                }}
+            }}
+            return '';
+        }}
+        async function _tcImagen(bloques) {{
+            const caja = document.createElement('div');
+            caja.setAttribute('style', 'position:fixed;left:-100000px;top:0;background:#ffffff;padding:0;display:inline-block;font-family:Poppins,Segoe UI,Arial,sans-serif');
+            bloques.forEach((b, k) => {{
+                if (b.titulo && bloques.length > 1) {{
+                    const h = document.createElement('div');
+                    h.textContent = b.titulo;
+                    h.setAttribute('style', `font:700 13px Poppins,Segoe UI,Arial,sans-serif;color:#334155;margin:${{k ? 14 : 0}}px 0 6px`);
+                    caja.appendChild(h);
+                }}
+                caja.appendChild(b.tabla);
+            }});
+            document.body.appendChild(caja);
+            const W = Math.ceil(caja.scrollWidth) + 2, H = Math.ceil(caja.scrollHeight) + 2;
+            caja.style.position = 'static';
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{W}}" height="${{H}}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="background:#fff;">${{new XMLSerializer().serializeToString(caja)}}</div></foreignObject></svg>`;
+            caja.remove();
+            const im = new Image();
+            await new Promise((ok, no) => {{ im.onload = ok; im.onerror = () => no(new Error('no se pudo dibujar la tabla')); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); }});
+            return {{ im, W, H }};
+        }}
+        function _tcExcel(titulo, subtitulo, bloques) {{
+            const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;border:none;border-bottom:1px solid #e5e7eb;white-space:nowrap;';
+            let html = `<table style="border-collapse:collapse;"><tr><td style="${{base}}border:none;font-size:12pt;font-weight:bold;">${{titulo}}</td></tr>`
+                     + `<tr><td style="${{base}}border:none;color:#64748b;">${{subtitulo}}</td></tr>`;
+            const lineas = [titulo, subtitulo];
+            bloques.forEach(b => {{
+                if (b.titulo && bloques.length > 1) {{ html += `<tr><td style="${{base}}border:none;font-weight:bold;">${{b.titulo}}</td></tr>`; lineas.push('', b.titulo); }}
+                [...b.tabla.rows].forEach(tr => {{
+                    if (tr.style.display === 'none') return;
+                    const cs = [...tr.cells];
+                    html += '<tr>' + cs.map(td => {{
+                        const s = td.style, cspan = td.colSpan > 1 ? ` colspan="${{td.colSpan}}"` : '';
+                        const fondo = s.backgroundColor && !/rgba\\(0, 0, 0, 0\\)|transparent/.test(s.backgroundColor) ? `background:${{s.backgroundColor}};` : '';
+                        return `<td${{cspan}} style="${{base}}${{fondo}}color:${{s.color}};font-weight:${{s.fontWeight}};text-align:${{s.textAlign}};">${{td.textContent.replace(/\\s+/g, ' ').trim()}}</td>`;
+                    }}).join('') + '</tr>';
+                    lineas.push(cs.map(td => td.textContent.replace(/\\s+/g, ' ').trim() + '\\t'.repeat(Math.max(0, td.colSpan - 1))).join('\\t'));
+                }});
+                html += '<tr><td style="border:none;">&nbsp;</td></tr>';
+            }});
+            return {{ html: html + '</table>', texto: lineas.join('\\n') }};
+        }}
+        function _tcTablas(host) {{
+            return [...host.querySelectorAll('table')].filter(t => !t.closest(TC_EXCLUIR) && t.rows.length > 1 && t.closest('.section') === host);
+        }}
+        async function copiarTablaTC(hostId, rango) {{
+            const host = document.getElementById(hostId); if (!host) return;
+            const tablas = _tcTablas(host);
+            const T = _hgTitulos(tablas[0]);
+            const titulo = _hgTexto(host.querySelector('.section-title, h2')) || T.titulo;
+            const infos = tablas.map(t => _tcAnalizar(t));
+            const hist = infos.some(i => i.tipo !== 'fija');
+            const generar = async rg => {{
+                let ini = null, fin = null;
+                const bloques = tablas.map((t, k) => {{
+                    const info = infos[k], el = info.tipo === 'fija' ? null : _tcElegidos(t, info, rg, host);
+                    if (el && info.tipo === 'filas') {{
+                        const etq = info.idx.filter(i => el.has(i)).map(i => info.etq[info.idx.indexOf(i)]);
+                        if (etq.length) {{ ini = ini || etq[0]; fin = etq[etq.length - 1]; }}
+                    }}
+                    return {{ titulo: _tcTituloTabla(t, host), tabla: _tcClonar(t, info, el || new Set()) }};
+                }});
+                const nombre = (RANGOS_COPIA.find(r => r[0] === rg) || [, ''])[1];
+                const subtitulo = [T.modulo, hist ? nombre : '', ini ? `${{ini}} a ${{fin}}` : ''].filter(Boolean).join(' · ');
+                const ex = _tcExcel(titulo, subtitulo, bloques);
+                const img = await _tcImagen(bloques.map(b => ({{ titulo: b.titulo, tabla: b.tabla.cloneNode(true) }})));
+                const L = _lienzoCopiaMC(titulo, subtitulo, [], img.W, img.H, T.acento);
+                L.g.drawImage(img.im, L.x, L.y, img.W, img.H);
+                return {{ titulo, subtitulo, canvas: L.cv, html: ex.html, texto: ex.texto,
+                         archivo: titulo.replace(/[^\\wáéíóúñÁÉÍÓÚÑ ]+/g, ' ').trim().replace(/\\s+/g, '_') + '.png' }};
+            }};
+            if (!hist) return abrirModalCopia(await generar('todo'));
+            const hayVisible = tablas.some((t, k) => infos[k].tipo !== 'fija' && _tcScroll(t, host));
+            abrirModalCopia({{ generar, rangoInicial: rango || (hayVisible ? 'visible' : '13'),
+                              rangos: hayVisible ? undefined : ['6', '13', 'todo'] }});
+        }}
+        function _tcInstalar() {{
+            document.querySelectorAll('.section').forEach(host => {{
+                if (host.closest(TC_EXCLUIR) || host.querySelector(':scope > .gbar-tabla, [onclick*="copiar"]')) return;
+                const tablas = _tcTablas(host);
+                if (!tablas.length) return;
+                if (!host.id) host.id = 'tc-sec' + (++TC_N);
+                const div = document.createElement('div');
+                div.className = 'gbar gbar-tabla';
+                div.innerHTML = `<div class="gp gc"><button type="button" title="Copiar esta tabla como imagen o para Excel">${{HG_ICO_COPIA}}<span>Copiar tabla</span></button>`
+                    + `<div class="gpop gcp"><button type="button" data-v="visible">Solo lo que se ve</button><button type="button" data-v="6">Últimos 6 meses</button>`
+                    + `<button type="button" data-v="13">Últimos 13 meses</button><button type="button" data-v="todo">Toda la tabla</button></div></div>`;
+                let w = tablas[0];
+                while (w.parentElement && w.parentElement !== host) w = w.parentElement;
+                const titulo = host.querySelector(':scope > h2.section-title, :scope > .section-title');
+                if (titulo && titulo.nextElementSibling && !host.querySelector(':scope > .gbar-flota')) {{
+                    div.classList.add('gbar-flota'); host.classList.add('hg-rel');
+                    host.insertBefore(div, titulo.nextElementSibling);
+                }} else host.insertBefore(div, w);
+                const gc = div.querySelector('.gc'), bc = gc.querySelector(':scope > button');
+                bc.onclick = e => {{
+                    e.stopPropagation();
+                    const ts = _tcTablas(host), infos = ts.map(_tcAnalizar);
+                    if (!infos.some(i => i.tipo !== 'fija')) return copiarTablaTC(host.id, 'todo');
+                    gc.querySelector('[data-v="visible"]').style.display = ts.some((t, k) => infos[k].tipo !== 'fija' && _tcScroll(t, host)) ? '' : 'none';
+                    document.querySelectorAll('.gp.ab').forEach(x => x !== gc && x.classList.remove('ab'));
+                    gc.classList.toggle('ab');
+                }};
+                gc.querySelectorAll('.gcp button').forEach(o => o.onclick = e => {{ e.stopPropagation(); gc.classList.remove('ab'); copiarTablaTC(host.id, o.dataset.v); }});
+            }});
+        }}
+        let _tcEspera = null;
+        new MutationObserver(() => {{ clearTimeout(_tcEspera); _tcEspera = setTimeout(_tcInstalar, 350); }})
+            .observe(document.documentElement, {{ childList: true, subtree: true }});
+
+        // ===== DESCARGA EXCEL · MAT y CAMEL (resumen, cálculos e históricos) =====
+        const _xArgb = hex => 'FF' + String(hex || '#94a3b8').replace('#', '').toUpperCase().slice(0, 6);
+        const _xFmtVar = f => f === 'monto' ? '#,##0' : f === '%' ? '0.00%' : '0.0000';
+        function _xTitulo(ws, titulo, subtitulo, ncols, acento) {{
+            ws.mergeCells(1, 1, 1, ncols); ws.mergeCells(2, 1, 2, ncols);
+            const t = ws.getCell(1, 1); t.value = titulo; t.font = {{ name: 'Calibri', size: 14, bold: true, color: {{ argb: acento }} }};
+            const s = ws.getCell(2, 1); s.value = subtitulo; s.font = {{ name: 'Calibri', size: 10, italic: true, color: {{ argb: COLOR.GRIS_MEDIO }} }};
+            ws.getRow(1).height = 22;
+        }}
+        function _xEncabezado(ws, fila, textos, acento) {{
+            textos.forEach((tx, j) => {{
+                const c = ws.getCell(fila, j + 1); c.value = tx;
+                estilarCelda(c, {{ bold: true, color: COLOR.BLANCO, fill: acento, align: j ? 'center' : 'left', wrap: true }});
+            }});
+            ws.getRow(fila).height = 30;
+        }}
+        function _xCelda(ws, fila, col, valor, opts) {{
+            const c = ws.getCell(fila, col); c.value = valor;
+            estilarCelda(c, Object.assign({{ align: typeof valor === 'number' || (valor && valor.formula) ? 'right' : 'left' }}, opts || {{}}));
+            return c;
+        }}
+        function _xNivelCelda(c, color) {{
+            c.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: _xArgb(color) }} }};
+            c.font = {{ name: 'Calibri', size: 10, bold: true, color: {{ argb: COLOR.BLANCO }} }};
+            c.alignment = {{ horizontal: 'center', vertical: 'middle' }};
+        }}
+        function _xNiveles(ws, fila, niveles, acento, titulo) {{
+            _xCelda(ws, fila, 1, titulo, {{ bold: true, color: acento, border: {{}} }});
+            _xEncabezado(ws, fila + 1, ['Nivel', 'Desde (≥)', 'Hasta (<)'], acento);
+            niveles.forEach((n, k) => {{
+                const f = fila + 2 + k;
+                _xNivelCelda(_xCelda(ws, f, 1, n.nivel), n.color);
+                _xCelda(ws, f, 2, n.desde === null ? '—' : n.desde, {{ format: '0.00' }});
+                _xCelda(ws, f, 3, n.hasta === null ? 'Sin límite' : n.hasta, {{ format: '0.00' }});
+            }});
+            return fila + 2 + niveles.length;
+        }}
+        async function _xGuardar(wb, nombre) {{
+            const buf = await wb.xlsx.writeBuffer();
+            saveAs(new Blob([buf], {{ type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }}), nombre);
+        }}
+
+        // ----- Hojas de auditoría: una hoja por mes con el cálculo de cada variable, sus cuentas y los desgloses -----
+        const _xFmtTerm = (t, r) => t.tipo === 'Cuenta contable' ? '#,##0.00'
+            : t.tipo === 'Variable' ? _xFmtVar((r.variables[t.cod] || {{}}).formato)
+            : (/^(SOLVENCIA|INDICE_RIESGO_CARTERA|CALIDAD_CARTERA)$/.test(t.cod) ? '0.0000%' : '#,##0.00');
+        const _xSeccion = (ws, f, txt, A) => {{
+            ws.mergeCells(f, 1, f, 8);
+            const c = ws.getCell(f, 1); c.value = txt;
+            c.font = {{ name: 'Calibri', size: 12, bold: true, color: {{ argb: A }} }};
+            ws.getRow(f).height = 20;
+            return f + 1;
+        }};
+        const _xTotal = (ws, f, txt, col, valor, fmt, fuerte, desdeCol) => {{
+            const fill = fuerte ? COLOR.NARANJA_CLARO : COLOR.GRIS_CLARO;
+            ws.mergeCells(f, desdeCol || 1, f, col - 1);
+            for (let j = 1; j < (desdeCol || 1); j++) _xCelda(ws, f, j, '', {{ fill }});
+            _xCelda(ws, f, desdeCol || 1, txt, {{ bold: true, fill, wrap: true }});
+            _xCelda(ws, f, col, valor, {{ bold: true, format: fmt, fill }});
+            for (let j = col + 1; j <= 8; j++) _xCelda(ws, f, j, '', {{ fill }});
+            return f + 1;
+        }};
+        function _xMesCalculos(ws, r, f, A) {{
+            f = _xSeccion(ws, f, '1. Cálculo de las variables', A);
+            _xEncabezado(ws, f, ['Variable', 'Parte', 'Signo', 'Código', 'Concepto', 'Tipo', 'Saldo / valor', 'Valor con signo'], A); f++;
+            Object.values(r.variables).forEach(v => {{
+                const partes = [['Numerador', v.t_num || []], ['Denominador', v.t_den || []]].filter(p => p[1].length);
+                const totales = {{}};
+                partes.forEach(([parte, ts]) => {{
+                    const f0 = f;
+                    ts.forEach(t => {{
+                        const fmt = _xFmtTerm(t, r);
+                        _xCelda(ws, f, 1, v.nombre, {{ size: 9 }});
+                        _xCelda(ws, f, 2, parte, {{ size: 9 }});
+                        _xCelda(ws, f, 3, t.s === '-' ? '−' : '+', {{ align: 'center', bold: true }});
+                        _xCelda(ws, f, 4, t.cod, {{ size: 9 }});
+                        _xCelda(ws, f, 5, t.nombre, {{ size: 9, wrap: true }});
+                        _xCelda(ws, f, 6, t.tipo, {{ size: 9, color: COLOR.GRIS_MEDIO }});
+                        _xCelda(ws, f, 7, t.valor, {{ format: fmt }});
+                        _xCelda(ws, f, 8, t.valor === null ? null : {{ formula: (t.s === '-' ? '-' : '') + `G${{f}}`, result: t.s === '-' ? -t.valor : t.valor }}, {{ format: fmt }});
+                        f++;
+                    }});
+                    const tot = ts.reduce((s, t) => s + (t.valor === null ? 0 : (t.s === '-' ? -t.valor : t.valor)), 0);
+                    totales[parte] = f;
+                    f = _xTotal(ws, f, `${{v.nombre}} · total ${{parte.toLowerCase()}}`, 8,
+                                {{ formula: `SUM(H${{f0}}:H${{f - 1}})`, result: tot }}, ts.length === 1 ? _xFmtTerm(ts[0], r) : '#,##0.00');
+                }});
+                const formula = totales.Denominador ? `IF(H${{totales.Denominador}}=0,"",H${{totales.Numerador}}/H${{totales.Denominador}})` : `H${{totales.Numerador}}`;
+                f = _xTotal(ws, f, `${{v.nombre}} = ${{v.formula || ''}}`, 8, totales.Numerador ? {{ formula, result: v.valor }} : v.valor, _xFmtVar(v.formato), true);
+                ws.getRow(f - 1).height = 28;
+                f++;
+            }});
+            return f + 1;
+        }}
+        function _xMesRiesgo(ws, r, f, A) {{
+            const a = r.auditoria && r.auditoria.riesgo; if (!a) return f;
+            f = _xSeccion(ws, f, '2. Índice de riesgo de cartera · (B + C + D + E) ÷ cartera bruta', A);
+            _xEncabezado(ws, f, ['Sección', '', '', 'Cuenta', 'Concepto', '', 'Saldo', ''], A); f++;
+            const rangos = {{}};
+            a.lineas.forEach(l => {{
+                rangos[l.sec] = rangos[l.sec] || [f, f]; rangos[l.sec][1] = f;
+                _xCelda(ws, f, 1, l.sec, {{ size: 9 }}); _xCelda(ws, f, 2, ''); _xCelda(ws, f, 3, '');
+                _xCelda(ws, f, 4, l.cuenta, {{ size: 9 }});
+                _xCelda(ws, f, 5, l.nombre, {{ size: 9 }}); _xCelda(ws, f, 6, '');
+                _xCelda(ws, f, 7, l.valor, {{ format: '#,##0.00' }}); _xCelda(ws, f, 8, '');
+                f++;
+            }});
+            const suma = (sec, res) => rangos[sec] ? {{ formula: `SUM(G${{rangos[sec][0]}}:G${{rangos[sec][1]}})`, result: res }} : res;
+            const fBr = f; f = _xTotal(ws, f, 'Cartera bruta', 7, suma('Cartera bruta', a.bruta), '#,##0.00');
+            const fc = ['B', 'C', 'D', 'E'].map(c => {{ const x = f; f = _xTotal(ws, f, `Categoría ${{c}}`, 7, suma(`Categoría ${{c}}`, a[c]), '#,##0.00'); return x; }});
+            const fB = f; f = _xTotal(ws, f, 'Total categorías B a E', 7, {{ formula: fc.map(x => `G${{x}}`).join('+'), result: a.bcde }}, '#,##0.00');
+            f = _xTotal(ws, f, 'Categoría A (cartera bruta − B a E)', 7, {{ formula: `G${{fBr}}-G${{fB}}`, result: a.A }}, '#,##0.00');
+            f = _xTotal(ws, f, 'Índice de riesgo de cartera', 7, {{ formula: `IF(G${{fBr}}=0,"",G${{fB}}/G${{fBr}})`, result: a.indice }}, '0.00%', true);
+            return f + 2;
+        }}
+        function _xMesSolvencia(ws, r, f, A) {{
+            const a = r.auditoria && r.auditoria.solvencia; if (!a) return f;
+            f = _xSeccion(ws, f, '3. Relación de solvencia · patrimonio técnico ÷ activos ponderados por riesgo', A);
+            _xEncabezado(ws, f, ['Sección', '', '', 'Cuenta', 'Concepto', 'Ponderación', 'Saldo', 'Valor ponderado'], A); f++;
+            const rangos = {{}};
+            a.lineas.forEach(l => {{
+                const g = l.sec.startsWith('Activos') || l.sec === 'Contingentes' ? 'apr' : l.sec === 'Patrimonio básico' ? 'pb' : l.sec === 'Deducciones' ? 'ded' : 'pa';
+                rangos[g] = rangos[g] || [f, f]; rangos[g][1] = f;
+                _xCelda(ws, f, 1, l.sec, {{ size: 9, wrap: true }}); _xCelda(ws, f, 2, ''); _xCelda(ws, f, 3, '');
+                _xCelda(ws, f, 4, l.cuenta, {{ size: 9 }});
+                _xCelda(ws, f, 5, l.nombre, {{ size: 9, wrap: true }});
+                _xCelda(ws, f, 6, l.pond, {{ format: '0.00%' }});
+                _xCelda(ws, f, 7, l.valor, {{ format: '#,##0.00' }});
+                _xCelda(ws, f, 8, l.ponderado, {{ format: '#,##0.00' }});
+                f++;
+            }});
+            const suma = (g, res) => rangos[g] ? {{ formula: `SUM(H${{rangos[g][0]}}:H${{rangos[g][1]}})`, result: res }} : res;
+            const fApr = f; f = _xTotal(ws, f, 'Activos ponderados por riesgo (APR)', 8, suma('apr', a.apr), '#,##0.00');
+            const fPb = f; f = _xTotal(ws, f, 'Patrimonio básico', 8, suma('pb', a.pb), '#,##0.00');
+            const fDed = f; f = _xTotal(ws, f, 'Deducciones', 8, suma('ded', a.ded), '#,##0.00');
+            const fPa = f; f = _xTotal(ws, f, 'Patrimonio adicional', 8, suma('pa', a.pa), '#,##0.00');
+            const fPt = f; f = _xTotal(ws, f, 'Patrimonio técnico = básico − deducciones + adicional', 8, {{ formula: `H${{fPb}}-H${{fDed}}+H${{fPa}}`, result: a.pt }}, '#,##0.00');
+            f = _xTotal(ws, f, 'Relación de solvencia', 8, {{ formula: `IF(H${{fApr}}=0,"",H${{fPt}}/H${{fApr}})`, result: a.solvencia }}, '0.00%', true);
+            return f + 1;
+        }}
+        function _xHojasMeses(wb, A) {{
+            [...DATOS_MATCAMEL].reverse().forEach(r => {{
+                const nombre = `${{(MESES_NOMBRE[r.mes] || r.mes).slice(0, 3)}}-${{r.anio}}`;
+                const ws = wb.addWorksheet(nombre, {{ views: [{{ showGridLines: false }}] }});
+                ws.columns = [{{ width: 30 }}, {{ width: 13 }}, {{ width: 6 }}, {{ width: 14 }}, {{ width: 50 }}, {{ width: 16 }}, {{ width: 20 }}, {{ width: 20 }}];
+                ws.mergeCells(1, 1, 1, 8); ws.mergeCells(2, 1, 2, 8);
+                const t = ws.getCell(1, 1); t.value = `Cálculos y datos · ${{_etqLargaMC(r)}}`;
+                t.font = {{ name: 'Calibri', size: 14, bold: true, color: {{ argb: A }} }};
+                const s = ws.getCell(2, 1);
+                s.value = `Parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}}) · saldos en pesos · Valor con signo = saldo con el signo de la fórmula`;
+                s.font = {{ name: 'Calibri', size: 10, italic: true, color: {{ argb: COLOR.GRIS_MEDIO }} }};
+                let f = 4;
+                f = _xMesCalculos(ws, r, f, A);
+                f = _xMesRiesgo(ws, r, f, A);
+                _xMesSolvencia(ws, r, f, A);
+            }});
+        }}
+        function _xHojaParametros(wb, A) {{
+            const ws = wb.addWorksheet('Parámetros', {{ views: [{{ showGridLines: false }}] }});
+            ws.columns = Array.from({{ length: 10 }}, (_, j) => ({{ width: j === 0 ? 14 : 24 }}));
+            _xTitulo(ws, 'Parámetros configurados en parametros.xlsx · todas las versiones',
+                     'Cada mes usa la versión vigente en su fecha (hoja Versiones)', 10, A);
+            let f = 4;
+            Object.entries(PARAMETROS_MC || {{}}).forEach(([hoja, filas]) => {{
+                _xCelda(ws, f, 1, `Hoja ${{hoja}}`, {{ bold: true, size: 12, color: A, border: {{}} }}); f++;
+                if (!filas.length) {{ _xCelda(ws, f, 1, '(sin filas)', {{ border: {{}} }}); f += 2; return; }}
+                const cols = [...new Set(filas.flatMap(x => Object.keys(x)))].filter(Boolean);
+                _xEncabezado(ws, f, cols, A); f++;
+                filas.forEach(x => {{
+                    cols.forEach((k, j) => {{
+                        const v = x[k];
+                        _xCelda(ws, f, j + 1, v === null || v === undefined ? '' : v,
+                                {{ format: typeof v === 'number' && !Number.isInteger(v) ? '0.########' : undefined, wrap: typeof v === 'string' && v.length > 30, size: 9 }});
+                    }});
+                    f++;
+                }});
+                f++;
+            }});
+        }}
+        function _xAuditoria(wb, A) {{
+            _xHojasMeses(wb, A);
+            _xHojaParametros(wb, A);
+        }}
+
+        // ===== MÓDULO: CARTERA Y PROVISIÓN (comparativo entre dos períodos) =====
+        const CP_STATE = {{ inic: false, idx: 0, cmp: 0, modo: 'mes' }};
+        const CP_CATS = ['A', 'B', 'C', 'D', 'E'];
+        const CP_COLOR_CAT = {{ A: '#17A53D', B: '#8BC34A', C: '#E3B23C', D: '#F08A24', E: '#C91A15' }};
+        const CP_NOMBRE_CAT = {{ A: 'Riesgo normal', B: 'Riesgo aceptable', C: 'Riesgo apreciable', D: 'Riesgo significativo', E: 'Riesgo de incobrabilidad' }};
+        const _cpM = v => v === null || v === undefined || isNaN(v) ? '—' : (v / 1e6).toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+        const _cpP = v => v === null || v === undefined || !isFinite(v) ? '—' : (v * 100).toFixed(2).replace('.', ',') + '%';
+        const _cpEtq = r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`;
+        // Totales e indicadores de un período (misma lógica de la hoja «Cartera» del Excel)
+        function _cpCalc(r) {{
+            const g = {{}}; let cart = 0, prov = 0, riesgo = 0;
+            Object.entries(r.grupos).forEach(([nom, cats]) => {{
+                let c = 0, p = 0;
+                CP_CATS.forEach(k => {{ c += cats[k].cartera; p += cats[k].provision; if (k !== 'A') riesgo += cats[k].cartera; }});
+                g[nom] = {{ cartera: c, provision: p }};
+                cart += c; prov += p;
+            }});
+            const pg = r.provision_general, provTotal = prov + pg;
+            const mora = r.indice_mora;
+            return {{ grupos: g, cartera: cart, provision: prov, neta_ind: cart - prov, pg, neta: cart - prov - pg, riesgo, provTotal,
+                     calidad: cart ? riesgo / cart : null, cubrimiento: riesgo ? provTotal / riesgo : null,
+                     mora, carteraMora: mora === null || mora === undefined ? null : mora * cart,
+                     cubrMora: mora ? provTotal / (mora * cart) : null, pctProv: cart ? prov / cart : null }};
+        }}
+        function _cpPoblarComparador() {{
+            const sa = document.getElementById('cp-cmp-anio'), sm = document.getElementById('cp-cmp-mes');
+            const anios = [...new Set(DATOS_CARTERA_PROV.map(r => r.anio))].sort();
+            sa.innerHTML = anios.map(a => `<option value="${{a}}">${{a}}</option>`).join('');
+            const meses = () => {{
+                const ms = DATOS_CARTERA_PROV.filter(r => r.anio === +sa.value).map(r => r.mes);
+                sm.innerHTML = ms.map(m => `<option value="${{m}}">${{MESES_NOMBRE[m] || m}}</option>`).join('');
+            }};
+            sa.onchange = () => {{ meses(); sm.value = sm.options[sm.options.length - 1].value; _cpCambioComparador(); }};
+            sm.onchange = _cpCambioComparador;
+            CP_STATE._meses = meses;
+        }}
+        function _cpPonerComparador(idx) {{
+            const r = DATOS_CARTERA_PROV[idx]; if (!r) return;
+            CP_STATE.cmp = idx;
+            const sa = document.getElementById('cp-cmp-anio'), sm = document.getElementById('cp-cmp-mes');
+            sa.value = r.anio; CP_STATE._meses(); sm.value = r.mes;
+        }}
+        function _cpIdxDe(anio, mes) {{ return DATOS_CARTERA_PROV.findIndex(r => r.anio === anio && r.mes === mes); }}
+        function _cpCambioComparador() {{
+            const k = _cpIdxDe(+document.getElementById('cp-cmp-anio').value, document.getElementById('cp-cmp-mes').value);
+            if (k >= 0) {{ CP_STATE.cmp = k; CP_STATE.modo = 'libre'; renderCarteraProvision(); }}
+        }}
+        // Atajos de comparación: mes anterior, mismo mes del año anterior, diciembre anterior
+        function compararCarteraProvision(modo) {{
+            CP_STATE.modo = modo;
+            const r = DATOS_CARTERA_PROV[CP_STATE.idx];
+            let k = -1;
+            if (modo === 'mes') k = CP_STATE.idx - 1;
+            else if (modo === 'anio') k = _cpIdxDe(r.anio - 1, r.mes);
+            else if (modo === 'dic') k = _cpIdxDe(r.anio - 1, 'DICIEMBRE');
+            if (k < 0) k = Math.max(0, CP_STATE.idx - 1);
+            _cpPonerComparador(k);
+            renderCarteraProvision();
+        }}
+        function abrirCarteraProvision() {{
+            ocultarTodosLosModulos();
+            document.getElementById('cartera-provision-root').classList.remove('oculto');
+            if (!CP_STATE.inic) {{
+                CP_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_CARTERA_PROV, 'cp-filtro-anio', 'cp-filtro-mes', () => {{
+                    const k = _cpIdxDe(+document.getElementById('cp-filtro-anio').value, document.getElementById('cp-filtro-mes').value);
+                    if (k >= 0) {{ CP_STATE.idx = k; compararCarteraProvision(CP_STATE.modo === 'libre' ? 'mes' : CP_STATE.modo); }}
+                }});
+                _cpPoblarComparador();
+                CP_STATE.idx = DATOS_CARTERA_PROV.length - 1;
+                compararCarteraProvision('mes');
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function _cpVar(a, b, esPct, menorMejor) {{
+            if (a === null || b === null || a === undefined || b === undefined) return {{ txt: '—', cls: 'igual' }};
+            const d = a - b;
+            const cero = esPct ? Math.abs(d) < 0.00005 : Math.abs(d) < 0.5;
+            const bueno = menorMejor ? d < 0 : d > 0;
+            const cls = cero ? 'igual' : (bueno ? 'sube' : 'baja');
+            const fl = cero ? '▬' : (d > 0 ? '▲' : '▼');
+            const txt = esPct ? `${{d >= 0 ? '+' : ''}}${{(d * 100).toFixed(2).replace('.', ',')}} pp` : `${{d >= 0 ? '+' : ''}}${{_cpM(d)}}`;
+            return {{ txt: `${{fl}} ${{txt}}`, cls, d }};
+        }}
+        const _cpVarPct = (a, b) => (b ? (a - b) / Math.abs(b) : null);
+        function renderCarteraProvision() {{
+            const A = DATOS_CARTERA_PROV[CP_STATE.idx], B = DATOS_CARTERA_PROV[CP_STATE.cmp];
+            const ca = _cpCalc(A), cb = _cpCalc(B);
+            const eA = _cpEtq(A), eB = _cpEtq(B);
+            document.querySelectorAll('.cp-chip').forEach(b => b.classList.toggle('activo', b.dataset.modo === CP_STATE.modo));
+            document.getElementById('cp-sub-tabla').textContent = `${{eA}} frente a ${{eB}} · cifras en millones de pesos · pasa el cursor por una categoría para ver sus cuentas`;
+            // Tarjetas
+            const tarjeta = (lbl, va, vb, fmt, esPct, menorMejor, color, sub) => {{
+                const v = _cpVar(va, vb, esPct, menorMejor);
+                return `<div class="cp-kpi" style="--c:${{color}}"><div class="cp-kpi-lbl">${{lbl}}</div><div class="cp-kpi-val">${{fmt(va)}}</div>
+                        <div class="cp-kpi-pie"><span class="dep-crec ${{v.cls}}">${{v.txt}}</span><span class="cp-kpi-sub">${{sub || ('vs ' + eB)}}</span></div></div>`;
+            }};
+            document.getElementById('cp-kpis').innerHTML =
+                tarjeta('Cartera bruta', ca.cartera, cb.cartera, _cpM, false, false, '#1E7F73') +
+                tarjeta('Provisión individual + general', ca.provTotal, cb.provTotal, _cpM, false, false, '#2A9D8F') +
+                tarjeta('Índice de calidad de la cartera', ca.calidad, cb.calidad, _cpP, true, true, '#E08A00') +
+                tarjeta('Cubrimiento de cartera en riesgo', ca.cubrimiento, cb.cubrimiento, _cpP, true, false, '#4D61B4');
+            // Tabla principal
+            const fila = (etq, a, b, opts) => {{
+                opts = opts || {{}};
+                const netaA = a.cartera - a.provision, netaB = b.cartera - b.provision;
+                const vc = _cpVar(a.cartera, b.cartera, false, false), vp = _cpVar(a.provision, b.provision, false, true);
+                const pc = _cpVarPct(a.cartera, b.cartera), pp = _cpVarPct(a.provision, b.provision);
+                const pctTxt = v => v === null ? '—' : `${{v >= 0 ? '+' : ''}}${{(v * 100).toFixed(2).replace('.', ',')}}%`;
+                return `<tr class="${{opts.cls || ''}}"${{opts.title ? ` title="${{opts.title}}"` : ''}}>
+                    <td class="cp-cat">${{etq}}</td>
+                    <td class="num">${{_cpM(a.cartera)}}</td><td class="num">${{_cpM(a.provision)}}</td><td class="num cp-neta">${{_cpM(netaA)}}</td>
+                    <td class="num cp-cob">${{a.cartera ? _cpP(a.provision / a.cartera) : '—'}}</td>
+                    <td class="num cp-sep">${{_cpM(b.cartera)}}</td><td class="num">${{_cpM(b.provision)}}</td><td class="num cp-neta">${{_cpM(netaB)}}</td>
+                    <td class="num cp-sep"><span class="cp-var ${{vc.cls}}">${{vc.txt}}</span></td><td class="num cp-varp ${{vc.cls}}">${{pctTxt(pc)}}</td>
+                    <td class="num"><span class="cp-var ${{vp.cls}}">${{vp.txt}}</span></td><td class="num cp-varp ${{vp.cls}}">${{pctTxt(pp)}}</td>
+                </tr>`;
+            }};
+            const cuentasTxt = (r, g, k) => {{
+                const c = r.grupos[g][k];
+                const l = o => Object.entries(o).map(([cod, v]) => `${{cod}}: ${{_cpM(v)}}`).join(' · ') || 'sin cuentas';
+                return `Cartera → ${{l(c.cuentas_cartera)}} | Provisión → ${{l(c.cuentas_provision)}}`;
+            }};
+            let h = `<thead><tr class="cp-grupo-cab"><th rowspan="2" class="cp-cat">Categoría</th>
+                        <th colspan="4" class="cp-g-act">${{eA}}</th><th colspan="3" class="cp-g-cmp">${{eB}}</th><th colspan="4" class="cp-g-var">Variación</th></tr>
+                     <tr><th>Cartera</th><th>Provisión</th><th>Cartera neta</th><th>% Prov.</th>
+                         <th class="cp-sep">Cartera</th><th>Provisión</th><th>Cartera neta</th>
+                         <th class="cp-sep">Cartera $</th><th>Cartera %</th><th>Provisión $</th><th>Provisión %</th></tr></thead><tbody>`;
+            Object.keys(A.grupos).forEach(g => {{
+                h += `<tr class="cp-titulo-grupo"><td colspan="12">${{g}}</td></tr>`;
+                CP_CATS.forEach(k => {{
+                    h += fila(`<i class="cp-dot" style="background:${{CP_COLOR_CAT[k]}}"></i><b>${{k}}</b> <small>${{CP_NOMBRE_CAT[k]}}</small>`,
+                              A.grupos[g][k], B.grupos[g][k], {{ title: `${{g}} ${{k}} (${{CP_NOMBRE_CAT[k]}}) · ${{cuentasTxt(A, g, k)}}` }});
+                }});
+                h += fila(`Subtotal ${{g.toLowerCase()}}`, ca.grupos[g], cb.grupos[g], {{ cls: 'cp-subtotal' }});
+            }});
+            h += fila('Total cartera', {{ cartera: ca.cartera, provision: ca.provision }}, {{ cartera: cb.cartera, provision: cb.provision }}, {{ cls: 'cp-total' }});
+            const vpg = _cpVar(ca.pg, cb.pg, false, true), vneta = _cpVar(ca.neta, cb.neta, false, false);
+            const pctTxt = v => v === null ? '—' : `${{v >= 0 ? '+' : ''}}${{(v * 100).toFixed(2).replace('.', ',')}}%`;
+            h += `<tr class="cp-pg" title="Cuenta 1468 · Deterioro general de cartera"><td class="cp-cat">(−) Provisión general <small>cuenta 1468</small></td>
+                    <td></td><td class="num">${{_cpM(ca.pg)}}</td><td></td><td class="num cp-cob">${{_cpP(ca.cartera ? ca.pg / ca.cartera : null)}}</td>
+                    <td class="cp-sep"></td><td class="num">${{_cpM(cb.pg)}}</td><td></td>
+                    <td class="cp-sep"></td><td></td><td class="num"><span class="cp-var ${{vpg.cls}}">${{vpg.txt}}</span></td><td class="num cp-varp ${{vpg.cls}}">${{pctTxt(_cpVarPct(ca.pg, cb.pg))}}</td></tr>`;
+            h += `<tr class="cp-neta-total"><td class="cp-cat">Total cartera neta</td>
+                    <td></td><td></td><td class="num">${{_cpM(ca.neta)}}</td><td></td>
+                    <td class="cp-sep"></td><td></td><td class="num">${{_cpM(cb.neta)}}</td>
+                    <td class="num cp-sep"><span class="cp-var ${{vneta.cls}}">${{vneta.txt}}</span></td><td class="num cp-varp ${{vneta.cls}}">${{pctTxt(_cpVarPct(ca.neta, cb.neta))}}</td><td></td><td></td></tr>`;
+            document.getElementById('cp-tabla').innerHTML = h + '</tbody>';
+            // Indicadores
+            const ind = (lbl, expl, va, vb, esPct, menorMejor) => {{
+                const v = _cpVar(va, vb, esPct, menorMejor);
+                return `<tr><td class="cp-cat">${{lbl}}<small>${{expl}}</small></td><td class="num cp-ind-val">${{esPct ? _cpP(va) : _cpM(va)}}</td>
+                        <td class="num">${{esPct ? _cpP(vb) : _cpM(vb)}}</td><td class="num"><span class="cp-var ${{v.cls}}">${{v.txt}}</span></td></tr>`;
+            }};
+            document.getElementById('cp-indicadores').innerHTML =
+                `<thead><tr><th class="cp-cat">Indicador</th><th class="cp-g-act">${{eA}}</th><th class="cp-g-cmp">${{eB}}</th><th class="cp-g-var">Variación</th></tr></thead><tbody>`
+                + ind('Total cartera en riesgo por calificación', 'categorías B, C, D y E', ca.riesgo, cb.riesgo, false, true)
+                + ind('Provisión individual + provisión general', 'provisión por categoría + cuenta 1468', ca.provTotal, cb.provTotal, false, false)
+                + ind('Índice de calidad de la cartera', 'cartera en riesgo ÷ cartera bruta', ca.calidad, cb.calidad, true, true)
+                + ind('Cubrimiento de cartera en riesgo', 'provisión total ÷ cartera en riesgo', ca.cubrimiento, cb.cubrimiento, true, false)
+                + ind('Índice de la cartera en mora', 'módulo Índice de Mora', ca.mora, cb.mora, true, true)
+                + ind('Cubrimiento de cartera en mora', 'provisión total ÷ (índice de mora × cartera bruta)', ca.cubrMora, cb.cubrMora, true, false)
+                + '</tbody>';
+            // Barras de composición por categoría
+            const barras = (c, r) => CP_CATS.map(k => {{
+                const v = Object.values(r.grupos).reduce((s, g) => s + g[k].cartera, 0);
+                return `<i style="background:${{CP_COLOR_CAT[k]}};width:${{c.cartera ? (v / c.cartera * 100) : 0}}%" title="${{k}}: ${{_cpM(v)}} (${{_cpP(c.cartera ? v / c.cartera : 0)}})"></i>`;
+            }}).join('');
+            const riesgoCat = r => CP_CATS.filter(k => k !== 'A').map(k => {{
+                const v = Object.values(r.grupos).reduce((s, g) => s + g[k].cartera, 0);
+                return `<span><i class="cp-dot" style="background:${{CP_COLOR_CAT[k]}}"></i>${{k}} ${{_cpM(v)}}</span>`;
+            }}).join('');
+            document.getElementById('cp-composicion').innerHTML =
+                `<div class="cp-comp-fila"><div class="cp-comp-etq">${{eA}}</div><div class="cp-comp-barra">${{barras(ca, A)}}</div><div class="cp-comp-riesgo">${{riesgoCat(A)}}</div></div>
+                 <div class="cp-comp-fila"><div class="cp-comp-etq">${{eB}}</div><div class="cp-comp-barra">${{barras(cb, B)}}</div><div class="cp-comp-riesgo">${{riesgoCat(B)}}</div></div>
+                 <div class="cp-comp-ley">${{CP_CATS.map(k => `<span><i class="cp-dot" style="background:${{CP_COLOR_CAT[k]}}"></i>${{k}} · ${{CP_NOMBRE_CAT[k]}}</span>`).join('')}}</div>`;
+        }}
+        function volverAlSubmenuActivoDesdeCarteraProvision() {{
+            ocultarTodosLosModulos();
+            document.getElementById('submenu-activo').classList.remove('oculto');
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        // Excel: comparativo con fórmulas, indicadores, cuentas de ambos períodos e histórico
+        async function descargarExcelCarteraProvision() {{
+            const A = DATOS_CARTERA_PROV[CP_STATE.idx], B = DATOS_CARTERA_PROV[CP_STATE.cmp], AC = 'FF1E7F73';
+            const eA = _cpEtq(A), eB = _cpEtq(B), MM = '#,##0.00;[Red]-#,##0.00', PC = '0.00%';
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            const ws = wb.addWorksheet('Comparativo', {{ views: [{{ state: 'frozen', ySplit: 5, showGridLines: false }}] }});
+            ws.columns = [{{ width: 34 }}, ...Array(11).fill({{ width: 15 }})];
+            _xTitulo(ws, 'Cartera de créditos total (con pérdida esperada) · millones de pesos', `${{eA}} frente a ${{eB}}`, 12, AC);
+            ws.mergeCells(4, 2, 4, 5); ws.mergeCells(4, 6, 4, 8); ws.mergeCells(4, 9, 4, 12);
+            [[2, eA], [6, eB], [9, 'Variación']].forEach(([c, t]) => estilarCelda(Object.assign(ws.getCell(4, c), {{ value: t }}), {{ bold: true, color: COLOR.BLANCO, fill: AC, align: 'center' }}));
+            _xEncabezado(ws, 5, ['Categoría', 'Cartera', 'Provisión', 'Cartera neta', '% Provisión', 'Cartera', 'Provisión', 'Cartera neta', 'Cartera $', 'Cartera %', 'Provisión $', 'Provisión %'], AC);
+            let f = 6;
+            const filaX = (etq, ca_, pa_, cb_, pb_, opts) => {{
+                opts = opts || {{}};
+                const st = Object.assign({{}}, opts.fill ? {{ fill: opts.fill, bold: true }} : {{}});
+                _xCelda(ws, f, 1, etq, st);
+                _xCelda(ws, f, 2, ca_, Object.assign({{ format: MM }}, st)); _xCelda(ws, f, 3, pa_, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 4, {{ formula: `B${{f}}-C${{f}}` }}, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 5, {{ formula: `IF(B${{f}}=0,"",C${{f}}/B${{f}})` }}, Object.assign({{ format: PC }}, st));
+                _xCelda(ws, f, 6, cb_, Object.assign({{ format: MM }}, st)); _xCelda(ws, f, 7, pb_, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 8, {{ formula: `F${{f}}-G${{f}}` }}, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 9, {{ formula: `B${{f}}-F${{f}}` }}, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 10, {{ formula: `IF(F${{f}}=0,"",I${{f}}/F${{f}})` }}, Object.assign({{ format: PC }}, st));
+                _xCelda(ws, f, 11, {{ formula: `C${{f}}-G${{f}}` }}, Object.assign({{ format: MM }}, st));
+                _xCelda(ws, f, 12, {{ formula: `IF(G${{f}}=0,"",K${{f}}/G${{f}})` }}, Object.assign({{ format: PC }}, st));
+                return f++;
+            }};
+            const subt = [];
+            Object.keys(A.grupos).forEach(g => {{
+                ws.mergeCells(f, 1, f, 12); _xCelda(ws, f, 1, g, {{ bold: true, color: AC, fill: 'FFE6F2F0' }}); f++;
+                const f0 = f;
+                CP_CATS.forEach(k => filaX(`${{k}} · ${{CP_NOMBRE_CAT[k]}}`, A.grupos[g][k].cartera / 1e6, A.grupos[g][k].provision / 1e6, B.grupos[g][k].cartera / 1e6, B.grupos[g][k].provision / 1e6));
+                const s = f;
+                filaX(`Subtotal ${{g.toLowerCase()}}`, {{ formula: `SUM(B${{f0}}:B${{f - 1}})` }}, {{ formula: `SUM(C${{f0}}:C${{f - 1}})` }}, {{ formula: `SUM(F${{f0}}:F${{f - 1}})` }}, {{ formula: `SUM(G${{f0}}:G${{f - 1}})` }}, {{ fill: COLOR.GRIS_CLARO }});
+                subt.push(s);
+            }});
+            const sm = c => ({{ formula: subt.map(x => `${{c}}${{x}}`).join('+') }});
+            const fT = filaX('Total cartera', sm('B'), sm('C'), sm('F'), sm('G'), {{ fill: COLOR.NARANJA_CLARO }});
+            const fPg = f; _xCelda(ws, f, 1, '(−) Provisión general (cuenta 1468)', {{ bold: true }});
+            _xCelda(ws, f, 3, A.provision_general / 1e6, {{ format: MM }}); _xCelda(ws, f, 7, B.provision_general / 1e6, {{ format: MM }});
+            _xCelda(ws, f, 11, {{ formula: `C${{f}}-G${{f}}` }}, {{ format: MM }}); _xCelda(ws, f, 12, {{ formula: `IF(G${{f}}=0,"",K${{f}}/G${{f}})` }}, {{ format: PC }}); f++;
+            const fN = f; _xCelda(ws, f, 1, 'Total cartera neta', {{ bold: true, fill: COLOR.NARANJA_CLARO }});
+            _xCelda(ws, f, 4, {{ formula: `D${{fT}}-C${{fPg}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
+            _xCelda(ws, f, 8, {{ formula: `H${{fT}}-G${{fPg}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
+            _xCelda(ws, f, 9, {{ formula: `D${{f}}-H${{f}}` }}, {{ bold: true, format: MM, fill: COLOR.NARANJA_CLARO }});
+            _xCelda(ws, f, 10, {{ formula: `IF(H${{f}}=0,"",I${{f}}/H${{f}})` }}, {{ bold: true, format: PC, fill: COLOR.NARANJA_CLARO }}); f += 2;
+            // Indicadores con fórmulas
+            _xEncabezado(ws, f, ['Indicador', eA, eB, 'Variación'], AC); f++;
+            const riesgoF = col => subt.map(s => `SUM(${{col}}${{s - 4}}:${{col}}${{s - 1}})`).join('+');
+            const ind = (lbl, fa, fb, fmt, esPct) => {{
+                _xCelda(ws, f, 1, lbl, {{ bold: true }});
+                _xCelda(ws, f, 2, fa, {{ format: fmt }}); _xCelda(ws, f, 3, fb, {{ format: fmt }});
+                _xCelda(ws, f, 4, {{ formula: `IF(OR(B${{f}}="",C${{f}}=""),"",B${{f}}-C${{f}})` }}, {{ format: esPct ? '+0.00%;-0.00%' : MM }});
+                return f++;
+            }};
+            const fR = ind('Total cartera en riesgo (B a E)', {{ formula: riesgoF('B') }}, {{ formula: riesgoF('F') }}, MM);
+            const fP = ind('Provisión individual + general', {{ formula: `C${{fT}}+C${{fPg}}` }}, {{ formula: `G${{fT}}+G${{fPg}}` }}, MM);
+            ind('Índice de calidad de la cartera', {{ formula: `IF(B${{fT}}=0,"",B${{fR}}/B${{fT}})` }}, {{ formula: `IF(F${{fT}}=0,"",C${{fR}}/F${{fT}})` }}, PC, true);
+            ind('Cubrimiento de cartera en riesgo', {{ formula: `IF(B${{fR}}=0,"",B${{fP}}/B${{fR}})` }}, {{ formula: `IF(C${{fR}}=0,"",C${{fP}}/C${{fR}})` }}, PC, true);
+            const fM = ind('Índice de la cartera en mora (módulo Índice de Mora)', A.indice_mora, B.indice_mora, PC, true);
+            ind('Cubrimiento de cartera en mora', {{ formula: `IF(B${{fM}}*B${{fT}}=0,"",B${{fP}}/(B${{fM}}*B${{fT}}))` }}, {{ formula: `IF(C${{fM}}*F${{fT}}=0,"",C${{fP}}/(C${{fM}}*F${{fT}}))` }}, PC, true);
+            // Cuentas de los dos períodos
+            const wc = wb.addWorksheet('Cuentas', {{ views: [{{ state: 'frozen', ySplit: 4, showGridLines: false }}] }});
+            wc.columns = [{{ width: 12 }}, {{ width: 8 }}, {{ width: 14 }}, {{ width: 14 }}, {{ width: 18 }}, {{ width: 18 }}, {{ width: 18 }}];
+            _xTitulo(wc, 'Cuentas contables de cada categoría (pesos)', `${{eA}} y ${{eB}}`, 7, AC);
+            _xEncabezado(wc, 4, ['Grupo', 'Categoría', 'Concepto', 'Cuenta', eA, eB, 'Variación'], AC);
+            let fc = 5;
+            const filaC = (g, k, conc, cod, va, vb) => {{
+                _xCelda(wc, fc, 1, g); _xCelda(wc, fc, 2, k, {{ align: 'center' }}); _xCelda(wc, fc, 3, conc); _xCelda(wc, fc, 4, cod);
+                _xCelda(wc, fc, 5, va, {{ format: '#,##0.00' }}); _xCelda(wc, fc, 6, vb, {{ format: '#,##0.00' }});
+                _xCelda(wc, fc, 7, {{ formula: `E${{fc}}-F${{fc}}` }}, {{ format: '#,##0.00;[Red]-#,##0.00' }}); fc++;
+            }};
+            Object.keys(A.grupos).forEach(g => CP_CATS.forEach(k => {{
+                Object.keys(A.grupos[g][k].cuentas_cartera).forEach(c => filaC(g, k, 'Cartera', c, A.grupos[g][k].cuentas_cartera[c], B.grupos[g][k].cuentas_cartera[c]));
+                Object.keys(A.grupos[g][k].cuentas_provision).forEach(c => filaC(g, k, 'Provisión', c, A.grupos[g][k].cuentas_provision[c], B.grupos[g][k].cuentas_provision[c]));
+            }}));
+            Object.keys(A.cuentas_provision_general).forEach(c => filaC('General', '—', 'Provisión general', c, A.cuentas_provision_general[c], B.cuentas_provision_general[c]));
+            // Histórico mensual
+            const wh = wb.addWorksheet('Histórico', {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+            const cab = ['Período'];
+            Object.keys(A.grupos).forEach(g => CP_CATS.forEach(k => cab.push(`${{g}} ${{k}} cartera`, `${{g}} ${{k}} provisión`)));
+            cab.push('Total cartera', 'Provisión individual', 'Provisión general', 'Cartera neta', 'Cartera en riesgo', 'Índice de calidad', 'Cubrimiento', 'Índice de mora', 'Cubrimiento mora');
+            wh.columns = cab.map((_, j) => ({{ width: j ? 14 : 18 }}));
+            _xTitulo(wh, 'Cartera y provisión · histórico mensual (millones de pesos)', 'Valores de cada mes', cab.length, AC);
+            _xEncabezado(wh, 4, cab, AC);
+            DATOS_CARTERA_PROV.forEach((r, i) => {{
+                const c = _cpCalc(r), fi = 5 + i;
+                const vals = [_cpEtq(r)];
+                Object.keys(r.grupos).forEach(g => CP_CATS.forEach(k => vals.push(r.grupos[g][k].cartera / 1e6, r.grupos[g][k].provision / 1e6)));
+                vals.push(c.cartera / 1e6, c.provision / 1e6, c.pg / 1e6, c.neta / 1e6, c.riesgo / 1e6, c.calidad, c.cubrimiento, c.mora, c.cubrMora);
+                vals.forEach((v, j) => _xCelda(wh, fi, j + 1, v, {{ format: j >= vals.length - 4 ? PC : (j ? MM : undefined),
+                                                                   fill: i === CP_STATE.idx || i === CP_STATE.cmp ? COLOR.NARANJA_CLARO : undefined }}));
+            }});
+            await _xGuardar(wb, `Cartera_y_Provision_${{eA.replace(/ /g, '_')}}_vs_${{eB.replace(/ /g, '_')}}.xlsx`);
+        }}
+        async function _xBoton(btn, fn) {{
+            const sp = btn.querySelector('span'), t0 = sp.textContent;
+            if (btn.disabled) return;
+            btn.disabled = true; sp.textContent = 'Generando…';
+            await new Promise(r => setTimeout(r, 30));
+            try {{ await fn(); sp.textContent = 'Descargado ✓'; }}
+            catch (e) {{ console.error(e); sp.textContent = 'No se pudo'; }}
+            setTimeout(() => {{ sp.textContent = t0; btn.disabled = false; }}, 1800);
+        }}
+        async function descargarExcelMAT() {{
+            const st = MC_STATE.mat, r = DATOS_MATCAMEL[st.idx], m = r.mat, A = 'FFB5452B';
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            const sub = `Período: ${{_etqLargaMC(r)}} · parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}})`;
+            // 1) Resumen y cálculo del mes
+            const ws = wb.addWorksheet('Resumen', {{ views: [{{ showGridLines: false }}] }});
+            ws.columns = [{{ width: 30 }}, {{ width: 70 }}, {{ width: 16 }}, {{ width: 14 }}, {{ width: 14 }}];
+            _xTitulo(ws, 'MAT · Modelo de Alerta Temprana', sub, 5, A);
+            _xEncabezado(ws, 4, ['Variable', 'Fórmula (cuentas)', 'Valor', 'Coeficiente', 'Aporte a z'], A);
+            let f = 5;
+            m.aportes.forEach(a => {{
+                const v = r.variables[a.variable] || {{}};
+                _xCelda(ws, f, 1, a.nombre, {{ bold: true }});
+                _xCelda(ws, f, 2, v.formula || '', {{ wrap: true, size: 9, color: COLOR.GRIS_MEDIO }});
+                _xCelda(ws, f, 3, a.valor, {{ format: _xFmtVar(v.formato) }});
+                _xCelda(ws, f, 4, a.coeficiente, {{ format: '0.0000' }});
+                _xCelda(ws, f, 5, {{ formula: `C${{f}}*D${{f}}`, result: a.aporte }}, {{ format: '0.0000' }});
+                f++;
+            }});
+            const intercepto = m.z - m.aportes.reduce((s, a) => s + a.aporte, 0);
+            _xCelda(ws, f, 1, 'Intercepto', {{ bold: true }});
+            _xCelda(ws, f, 2, 'Constante del modelo (hoja MAT de parametros.xlsx)', {{ size: 9, color: COLOR.GRIS_MEDIO }});
+            _xCelda(ws, f, 3, ''); _xCelda(ws, f, 4, '');
+            _xCelda(ws, f, 5, intercepto, {{ format: '0.0000' }});
+            const fz = f + 1, fp = f + 2, fe = f + 3, fn = f + 4;
+            const filaTot = (fila, txt, expl, valor, fmt) => {{
+                _xCelda(ws, fila, 1, txt, {{ bold: true, fill: COLOR.NARANJA_CLARO }});
+                _xCelda(ws, fila, 2, expl, {{ size: 9, color: COLOR.GRIS_MEDIO, fill: COLOR.NARANJA_CLARO }});
+                ws.mergeCells(fila, 3, fila, 4);
+                _xCelda(ws, fila, 3, '', {{ fill: COLOR.NARANJA_CLARO }});
+                _xCelda(ws, fila, 5, valor, {{ bold: true, format: fmt, fill: COLOR.NARANJA_CLARO }});
+            }};
+            filaTot(fz, 'Logit (z)', 'intercepto + Σ coeficiente × variable', {{ formula: `SUM(E5:E${{f}})`, result: m.z }}, '0.0000');
+            filaTot(fp, 'Probabilidad de quiebra', 'e^z / (1 + e^z)', {{ formula: `EXP(E${{fz}})/(1+EXP(E${{fz}}))`, result: m.probabilidad }}, '0.00%');
+            filaTot(fe, 'Escala 0-100', 'probabilidad × 100 · más cerca de 100, peor', {{ formula: `E${{fp}}*100`, result: m.escala }}, '0.00');
+            filaTot(fn, 'Nivel de alerta', 'según la hoja MAT_Niveles', m.nivel || '—', '@');
+            _xNivelCelda(ws.getCell(fn, 5), m.color);
+            _xNiveles(ws, fn + 2, m.niveles, A, 'Niveles de alerta vigentes');
+            // 2) Histórico
+            const vars = m.aportes.map(a => a.variable);
+            const wh = wb.addWorksheet('Histórico', {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+            const cab = ['Período', 'Versión', ...m.aportes.map(a => a.nombre), 'Logit (z)', 'Probabilidad', 'Escala 0-100', 'Nivel'];
+            wh.columns = cab.map((_, j) => ({{ width: j === 0 ? 18 : j === 1 ? 9 : 16 }}));
+            _xTitulo(wh, 'MAT · Histórico de resultados', 'Cada mes se calcula con la versión de parámetros vigente en su fecha', cab.length, A);
+            _xEncabezado(wh, 4, cab, A);
+            DATOS_MATCAMEL.forEach((x, i) => {{
+                const fi = 5 + i, sel = i === st.idx ? {{ fill: COLOR.NARANJA_CLARO, bold: true }} : {{}};
+                _xCelda(wh, fi, 1, _etqLargaMC(x), sel);
+                _xCelda(wh, fi, 2, x.version, Object.assign({{ align: 'center' }}, sel));
+                vars.forEach((k, j) => {{ const ap = x.mat.aportes.find(a => a.variable === k); _xCelda(wh, fi, 3 + j, ap ? ap.valor : null, Object.assign({{ format: _xFmtVar((x.variables[k] || {{}}).formato) }}, sel)); }});
+                const c0 = 3 + vars.length;
+                _xCelda(wh, fi, c0, x.mat.z, Object.assign({{ format: '0.0000' }}, sel));
+                _xCelda(wh, fi, c0 + 1, x.mat.probabilidad, Object.assign({{ format: '0.00%' }}, sel));
+                _xCelda(wh, fi, c0 + 2, x.mat.escala, Object.assign({{ format: '0.00' }}, sel));
+                _xNivelCelda(_xCelda(wh, fi, c0 + 3, x.mat.nivel || '—'), x.mat.color);
+            }});
+            // 3) Aportes al logit por mes
+            const wa = wb.addWorksheet('Aportes', {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+            const cabA = ['Período', ...m.aportes.map(a => a.nombre), 'Intercepto', 'Logit (z)'];
+            wa.columns = cabA.map((_, j) => ({{ width: j === 0 ? 18 : 16 }}));
+            _xTitulo(wa, 'MAT · Aporte de cada variable al logit (coeficiente × variable)', 'z = intercepto + suma de aportes', cabA.length, A);
+            _xEncabezado(wa, 4, cabA, A);
+            DATOS_MATCAMEL.forEach((x, i) => {{
+                const fi = 5 + i;
+                _xCelda(wa, fi, 1, _etqLargaMC(x));
+                let suma = 0;
+                vars.forEach((k, j) => {{ const ap = x.mat.aportes.find(a => a.variable === k); suma += ap ? ap.aporte : 0;
+                                         _xCelda(wa, fi, 2 + j, ap ? {{ formula: `${{ap.coeficiente}}*'Histórico'!${{wh.getColumn(3 + j).letter}}${{fi}}`, result: ap.aporte }} : null, {{ format: '0.0000' }}); }});
+                _xCelda(wa, fi, 2 + vars.length, x.mat.z - suma, {{ format: '0.0000' }});
+                const l1 = wa.getColumn(2).letter, l2 = wa.getColumn(2 + vars.length).letter;
+                _xCelda(wa, fi, 3 + vars.length, {{ formula: `SUM(${{l1}}${{fi}}:${{l2}}${{fi}})`, result: x.mat.z }}, {{ format: '0.0000', bold: true }});
+            }});
+            // 4) Variables calculadas del mes
+            _xHojaVariables(wb, r, A);
+            _xAuditoria(wb, A);
+            await _xGuardar(wb, `MAT_${{_etqLargaMC(r).replace(/ /g, '_')}}.xlsx`);
+        }}
+        function _xHojaVariables(wb, r, A) {{
+            const wv = wb.addWorksheet('Variables del mes', {{ views: [{{ state: 'frozen', ySplit: 4, showGridLines: false }}] }});
+            wv.columns = [{{ width: 26 }}, {{ width: 30 }}, {{ width: 80 }}, {{ width: 50 }}, {{ width: 18 }}];
+            _xTitulo(wv, `Variables calculadas · ${{_etqLargaMC(r)}}`, 'Fórmulas definidas en la hoja Variables de parametros.xlsx', 5, A);
+            _xEncabezado(wv, 4, ['Código', 'Variable', 'Fórmula (nombres de cuentas)', 'Fórmula (códigos)', 'Valor'], A);
+            Object.entries(r.variables).forEach(([k, v], i) => {{
+                const fi = 5 + i;
+                _xCelda(wv, fi, 1, k, {{ size: 9, color: COLOR.GRIS_MEDIO }});
+                _xCelda(wv, fi, 2, v.nombre, {{ bold: true }});
+                _xCelda(wv, fi, 3, v.formula || '', {{ wrap: true, size: 9 }});
+                _xCelda(wv, fi, 4, [v.numerador, v.denominador].filter(Boolean).join('  ÷  '), {{ wrap: true, size: 9, color: COLOR.GRIS_MEDIO }});
+                _xCelda(wv, fi, 5, v.valor, {{ format: _xFmtVar(v.formato) }});
+            }});
+        }}
+        async function descargarExcelCAMEL() {{
+            const st = MC_STATE.camel, r = DATOS_MATCAMEL[st.idx], c = r.camel, A = 'FFB5452B';
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            const sub = `Período: ${{_etqLargaMC(r)}} · parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}}) · mínimo legal de solvencia ${{(c.minimo_legal * 100).toFixed(2).replace('.', ',')}}%`;
+            const princ = c.indicadores.filter(i => i.grupo === 'Principal'), admin = c.indicadores.filter(i => i.grupo !== 'Principal');
+            const orden = [...princ, ...admin];
+            const fmtInd = i => _xFmtVar((r.variables[i.variable] || {{}}).formato || '%');
+            // 1) Resumen y calificación del mes
+            const ws = wb.addWorksheet('Resumen', {{ views: [{{ showGridLines: false }}] }});
+            ws.columns = [{{ width: 20 }}, {{ width: 34 }}, {{ width: 18 }}, {{ width: 13 }}, {{ width: 15 }}, {{ width: 46 }}, {{ width: 10 }}];
+            _xTitulo(ws, 'CAMEL · Calificación', sub, 7, A);
+            _xEncabezado(ws, 4, ['Componente', 'Indicador', 'Grupo', 'Valor', 'Valor comparado', 'Rango aplicado', 'Puntaje'], A);
+            orden.forEach((i, k) => {{
+                const fi = 5 + k;
+                _xCelda(ws, fi, 1, i.componente);
+                _xCelda(ws, fi, 2, i.nombre, {{ bold: true }});
+                _xCelda(ws, fi, 3, i.grupo);
+                _xCelda(ws, fi, 4, i.valor, {{ format: fmtInd(i) }});
+                _xCelda(ws, fi, 5, /m[ií]nimo/i.test(i.unidad || '') ? i.comparado : '', {{ format: '0.000"x"' }});
+                _xCelda(ws, fi, 6, i.regla || '', {{ wrap: true, size: 9 }});
+                const nv = _nivelDe(c.niveles, i.puntaje);
+                _xNivelCelda(_xCelda(ws, fi, 7, i.puntaje), nv ? nv.color : '#94a3b8');
+            }});
+            const p1 = 5, p2 = 4 + princ.length, a1 = p2 + 1, a2 = 4 + orden.length;
+            const fc = a2 + 1, fpr = a2 + 2, fn = a2 + 3;
+            const filaTot = (fila, txt, expl, valor) => {{
+                ws.mergeCells(fila, 1, fila, 2); ws.mergeCells(fila, 3, fila, 6);
+                _xCelda(ws, fila, 1, txt, {{ bold: true, fill: COLOR.NARANJA_CLARO }});
+                _xCelda(ws, fila, 3, expl, {{ size: 9, color: COLOR.GRIS_MEDIO, fill: COLOR.NARANJA_CLARO }});
+                _xCelda(ws, fila, 7, valor, {{ bold: true, format: '0.00', fill: COLOR.NARANJA_CLARO, align: 'center' }});
+            }};
+            filaTot(fc, 'Costo de agencia', 'promedio de los puntajes de los indicadores de costo de agencia',
+                    admin.length ? {{ formula: `AVERAGE(G${{a1}}:G${{a2}})`, result: c.costo_agencia }} : c.costo_agencia);
+            filaTot(fpr, 'Calificación CAMEL', 'promedio de los indicadores principales y el costo de agencia',
+                    {{ formula: `AVERAGE(G${{p1}}:G${{p2}},G${{fc}})`, result: c.promedio }});
+            filaTot(fn, 'Nivel de riesgo', 'según la hoja CAMEL_Niveles', c.nivel || '—');
+            _xNivelCelda(ws.getCell(fn, 7), c.color);
+            _xNiveles(ws, fn + 2, c.niveles, A, 'Niveles de riesgo vigentes');
+            // 2) Rangos de puntaje del mes
+            const wr = wb.addWorksheet('Rangos', {{ views: [{{ state: 'frozen', ySplit: 4, showGridLines: false }}] }});
+            wr.columns = [{{ width: 34 }}, {{ width: 10 }}, {{ width: 13 }}, {{ width: 13 }}, {{ width: 46 }}, {{ width: 18 }}, {{ width: 14 }}];
+            _xTitulo(wr, `CAMEL · Rangos de puntaje vigentes en ${{_etqLargaMC(r)}}`, 'Hoja CAMEL_Rangos de parametros.xlsx · desde (≥) y hasta (<)', 7, A);
+            _xEncabezado(wr, 4, ['Indicador', 'Puntaje', 'Desde (≥)', 'Hasta (<)', 'Regla', 'Unidad', 'Rango del mes'], A);
+            let f = 5;
+            orden.forEach(i => {{
+                const mult = /m[ií]nimo/i.test(i.unidad || '');
+                i.rangos.forEach(rg => {{
+                    const actual = rg.puntaje === i.puntaje, op = actual ? {{ fill: COLOR.NARANJA_CLARO, bold: true }} : {{}};
+                    _xCelda(wr, f, 1, i.nombre, op);
+                    _xCelda(wr, f, 2, rg.puntaje, Object.assign({{ align: 'center' }}, op));
+                    _xCelda(wr, f, 3, rg.desde === null ? '—' : rg.desde, Object.assign({{ format: mult ? '0.000"x"' : '0.00%' }}, op));
+                    _xCelda(wr, f, 4, rg.hasta === null ? 'Sin límite' : rg.hasta, Object.assign({{ format: mult ? '0.000"x"' : '0.00%' }}, op));
+                    _xCelda(wr, f, 5, rg.regla || '', Object.assign({{ wrap: true, size: 9 }}, op));
+                    _xCelda(wr, f, 6, i.unidad || '', op);
+                    _xCelda(wr, f, 7, actual ? '◄ aplica' : '', Object.assign({{ color: 'FFB5452B' }}, op));
+                    f++;
+                }});
+            }});
+            // 3) Puntajes y 4) valores históricos
+            const hoja = (nombre, titulo, valorDe, fmtDe, extra) => {{
+                const w = wb.addWorksheet(nombre, {{ views: [{{ state: 'frozen', xSplit: 1, ySplit: 4, showGridLines: false }}] }});
+                const cab = ['Período', 'Versión', ...orden.map(i => i.nombre), ...(extra ? ['Costo de agencia', 'Calificación', 'Nivel'] : [])];
+                w.columns = cab.map((_, j) => ({{ width: j === 0 ? 18 : j === 1 ? 9 : 15 }}));
+                _xTitulo(w, titulo, 'Cada mes se calcula con la versión de parámetros vigente en su fecha', cab.length, A);
+                _xEncabezado(w, 4, cab, A);
+                DATOS_MATCAMEL.forEach((x, k) => {{
+                    const fi = 5 + k, sel = k === st.idx ? {{ fill: COLOR.NARANJA_CLARO, bold: true }} : {{}};
+                    _xCelda(w, fi, 1, _etqLargaMC(x), sel);
+                    _xCelda(w, fi, 2, x.version, Object.assign({{ align: 'center' }}, sel));
+                    orden.forEach((i, j) => {{
+                        const ind = x.camel.indicadores.find(q => q.variable === i.variable);
+                        const cel = _xCelda(w, fi, 3 + j, ind ? valorDe(ind) : null, Object.assign({{ format: fmtDe(i), align: extra ? 'center' : 'right' }}, sel));
+                        if (extra && ind) {{ const nv = _nivelDe(x.camel.niveles, ind.puntaje); if (nv) _xNivelCelda(cel, nv.color); }}
+                    }});
+                    if (extra) {{
+                        const c0 = 3 + orden.length;
+                        _xCelda(w, fi, c0, x.camel.costo_agencia, Object.assign({{ format: '0.00', align: 'center' }}, sel));
+                        _xCelda(w, fi, c0 + 1, x.camel.promedio, Object.assign({{ format: '0.00', align: 'center' }}, sel));
+                        _xNivelCelda(_xCelda(w, fi, c0 + 2, x.camel.nivel || '—'), x.camel.color);
+                    }}
+                }});
+            }};
+            hoja('Puntajes históricos', 'CAMEL · Puntajes por indicador (1 = mejor · 5 = peor)', i => i.puntaje, () => '0', true);
+            hoja('Valores históricos', 'CAMEL · Valor de cada indicador', i => i.valor, fmtInd, false);
+            // 5) Variables calculadas del mes
+            _xHojaVariables(wb, r, A);
+            _xAuditoria(wb, A);
+            await _xGuardar(wb, `CAMEL_${{_etqLargaMC(r).replace(/ /g, '_')}}.xlsx`);
+        }}
+
+        // Marca el encabezado del módulo cuando queda fijo arriba (para darle fondo y sombra)
+        (function () {{
+            const marcar = () => document.querySelectorAll('.hdr-centinela').forEach(s => {{
+                const h = s.nextElementSibling;
+                if (h && h.offsetParent !== null) h.classList.toggle('pegado', s.getBoundingClientRect().top < 0);
+            }});
+            document.querySelectorAll('.container > header.header').forEach(h => {{
+                const s = document.createElement('div'); s.className = 'hdr-centinela'; s.style.height = '0';
+                h.parentElement.insertBefore(s, h);
+            }});
+            window.addEventListener('scroll', marcar, {{ passive: true }});
+            window.addEventListener('resize', marcar);
+        }})();
         // ===== ANIMACIÓN GLOBAL PARA TODOS LOS GRÁFICOS =====
         // Transición suave consistente en todo el modelo: al crear o actualizar cualquier
         // gráfico (incluido al cambiar de período en los filtros), las barras/líneas se
@@ -12178,9 +14333,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 borderRadius: 8,
                 borderColor: (ctx) => esDest(ctx) ? colorFuerte : borderColor,
                 borderWidth: 1,
-                padding: (ctx) => esDest(ctx) ? {{ top: 4, bottom: 4, left: 8, right: 8 }} : {{ top: 2, bottom: 2, left: 5, right: 5 }},
+                padding: (ctx) => esDest(ctx) ? {{ top: 5, bottom: 5, left: 9, right: 9 }} : {{ top: 3, bottom: 3, left: 6, right: 6 }},
                 color: (ctx) => esDest(ctx) ? '#ffffff' : color,
-                font: (ctx) => ({{ family: "'JetBrains Mono', monospace", size: esDest(ctx) ? 10.5 : 9.5, weight: esDest(ctx) ? '700' : '600' }}),
+                font: (ctx) => ({{ family: "'JetBrains Mono', monospace", size: (opts.fuente || 11) + (esDest(ctx) ? 1 : 0), weight: esDest(ctx) ? '700' : '600' }}),
                 formatter: formatter
             }};
         }}
@@ -12517,6 +14672,736 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
         
         // ===== RENDER PRINCIPAL =====
+
+        // ==========================================================
+        // ===== MÓDULOS MAT Y CAMEL =====
+        // ==========================================================
+        const MC_STATE = {{ mat: {{ inic: false, idx: 0, chart: null, paleta: 'nivel' }}, camel: {{ inic: false, idx: 0, chart: null, paleta: 'nivel' }} }};
+        function abrirAlertas() {{ _abrirUltimoSubmodulo('alertas'); }}
+        const _etqMC = r => `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0, 3)}}-${{String(r.anio).substring(2)}}`;
+        const _etqLargaMC = r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`;
+        const _fmt2 = v => (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(2).replace('.', ',');
+        const _fmt4 = v => (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(4).replace('.', ',');
+        function _fmtVarMC(v, formato) {{
+            if (v === null || v === undefined || isNaN(v)) return '—';
+            if (formato === 'monto') return fmtMillEnt(v / 1e6);
+            if (formato === 'veces') return _fmt2(v);
+            return (v * 100).toFixed(2).replace('.', ',') + '%';
+        }}
+        function _nivelDe(niveles, v) {{
+            return (niveles || []).find(n => v !== null && v !== undefined && (n.desde === null || v >= n.desde) && (n.hasta === null || v < n.hasta)) || null;
+        }}
+        function _abrirMC(clave, rootId, render) {{
+            ocultarTodosLosModulos();
+            document.getElementById(rootId).classList.remove('oculto');
+            const st = MC_STATE[clave];
+            if (!st.inic && DATOS_MATCAMEL.length) {{
+                st.inic = true;
+                st.idx = DATOS_MATCAMEL.length - 1;
+                _poblarFiltrosModulo(DATOS_MATCAMEL, clave + '-filtro-anio', clave + '-filtro-mes', () => {{
+                    const anio = parseInt(document.getElementById(clave + '-filtro-anio').value);
+                    const mes = document.getElementById(clave + '-filtro-mes').value;
+                    const i = DATOS_MATCAMEL.findIndex(r => r.anio === anio && r.mes === mes);
+                    if (i >= 0) {{ st.idx = i; render(); }}
+                }});
+                render();
+            }} else if (st.chart) {{
+                requestAnimationFrame(() => st.chart.resize());
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        function _versionMC(clave, r) {{
+            const el = document.getElementById(clave + '-version');
+            if (el) el.textContent = `Parámetros versión ${{r.version}} · vigente desde ${{r.version_desde}}`;
+        }}
+        // Tarjeta KPI con variación frente al mes anterior (en estos modelos subir es peor)
+        function _kpiMC(label, valor, prev, sub, txtValor, principal, colorValor) {{
+            let badge = '';
+            if (valor !== null && valor !== undefined && prev !== null && prev !== undefined) {{
+                const dlt = valor - prev;
+                const cls = Math.abs(dlt) < 0.005 ? 'igual' : (dlt > 0 ? 'baja' : 'sube');   // subir = desfavorable
+                const fl = Math.abs(dlt) < 0.005 ? '▬' : (dlt > 0 ? '▲' : '▼');
+                badge = `<span class="dep-crec ${{cls}}" title="vs mes anterior">${{fl}} ${{dlt >= 0 ? '+' : ''}}${{_fmt2(dlt)}}</span>`;
+            }}
+            return `<div class="mc-kpi-fila${{principal ? ' principal' : ''}}" style="--c:${{colorValor || '#B5452B'}};">
+                <span class="mc-kpi-lbl">${{label}}<small>${{sub}}</small></span>
+                <span class="mc-kpi-val">${{txtValor}}</span>
+                <span class="mc-kpi-var">${{badge}}</span>
+            </div>`;
+        }}
+
+        // ---------- Velocímetro MAT (0-100) ----------
+        function _dibujarVelocimetro(svgId, valor, niveles) {{
+            const cx = 160, cy = 140, R = 112, A0 = 150, BARRIDO = 240;
+            const ang = v => (A0 + BARRIDO * Math.max(0, Math.min(100, v)) / 100) * Math.PI / 180;
+            const pt = (v, r) => [cx + r * Math.cos(ang(v)), cy + r * Math.sin(ang(v))];
+            const arco = (v1, v2, r) => {{
+                const [x1, y1] = pt(v1, r), [x2, y2] = pt(v2, r);
+                const grande = (v2 - v1) * BARRIDO / 100 > 180 ? 1 : 0;
+                return `M ${{x1.toFixed(2)}} ${{y1.toFixed(2)}} A ${{r}} ${{r}} 0 ${{grande}} 1 ${{x2.toFixed(2)}} ${{y2.toFixed(2)}}`;
+            }};
+            let s = `<defs><radialGradient id="${{svgId}}-cara" cx="50%" cy="45%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#eef1f4"/></radialGradient>
+                     <linearGradient id="${{svgId}}-aguja" x1="0" x2="1"><stop offset="0%" stop-color="#ff5a4e"/><stop offset="100%" stop-color="#b3120a"/></linearGradient></defs>`;
+            s += `<circle cx="${{cx}}" cy="${{cy}}" r="138" fill="url(#${{svgId}}-cara)" stroke="#dfe3e8" stroke-width="3"/>`;
+            // Bandas de color: segmentos pequeños con el color de su nivel (MAT_Niveles)
+            for (let v = 0; v < 100; v += 2) {{
+                const n = _nivelDe(niveles, v + 1);
+                s += `<path d="${{arco(v, v + 2, R)}}" stroke="${{n ? n.color : '#cbd5e1'}}" stroke-width="20" fill="none"/>`;
+            }}
+            // Marcas (mayores cada 10) y números
+            for (let v = 0; v <= 100; v += 2) {{
+                const mayor = v % 10 === 0;
+                const [x1, y1] = pt(v, R - 10), [x2, y2] = pt(v, R + 10);
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="${{mayor ? 3 : 0.8}}"/>`;
+                if (mayor) {{
+                    const [tx, ty] = pt(v, R - 30);
+                    s += `<text x="${{tx.toFixed(1)}}" y="${{ty.toFixed(1)}}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="600" fill="#475569" font-family="Poppins, sans-serif">${{v}}</text>`;
+                }}
+            }}
+            // Aguja
+            if (valor !== null && valor !== undefined) {{
+                const a = ang(valor);
+                const [px, py] = pt(valor, R - 8);
+                const bx1 = cx + 7 * Math.cos(a + Math.PI / 2), by1 = cy + 7 * Math.sin(a + Math.PI / 2);
+                const bx2 = cx + 7 * Math.cos(a - Math.PI / 2), by2 = cy + 7 * Math.sin(a - Math.PI / 2);
+                s += `<polygon points="${{bx1.toFixed(1)}},${{by1.toFixed(1)}} ${{px.toFixed(1)}},${{py.toFixed(1)}} ${{bx2.toFixed(1)}},${{by2.toFixed(1)}}" fill="url(#${{svgId}}-aguja)" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.25))"/>`;
+            }}
+            s += `<circle cx="${{cx}}" cy="${{cy}}" r="16" fill="#d0160b"/><circle cx="${{cx - 4}}" cy="${{cy - 5}}" r="5" fill="#ff8a80" opacity="0.7"/>`;
+            s += `<text x="${{cx}}" y="${{cy + 30}}" text-anchor="middle" font-size="13" fill="#64748b" font-family="Poppins, sans-serif" font-weight="600">MAT</text>`;
+            // Pantalla digital y nivel
+            const n = _nivelDe(niveles, valor);
+            s += `<rect x="${{cx - 55}}" y="${{cy + 40}}" width="110" height="32" rx="6" fill="#111827"/>
+                  <text x="${{cx}}" y="${{cy + 62}}" text-anchor="middle" font-size="20" font-weight="700" fill="#f8fafc" font-family="'JetBrains Mono', monospace">${{_fmt2(valor)}}</text>`;
+            s += `<rect x="${{cx - 46}}" y="${{cy + 78}}" width="92" height="22" rx="11" fill="${{n ? n.color : '#64748b'}}"/>
+                  <text x="${{cx}}" y="${{cy + 93}}" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" font-family="Poppins, sans-serif">${{n ? n.nivel : '—'}}</text>`;
+            document.getElementById(svgId).innerHTML = s;
+        }}
+
+        // ---------- Termómetro CAMEL (1-5): un solo termómetro que cambia de color ----------
+        function _dibujarTermometro(svgId, valor, niveles) {{
+            const x = 150, w = 34, yTop = 26, yBase = 240, br = 32, bcy = 268;
+            const yDe = v => yBase - (Math.max(1, Math.min(5, v)) - 1) / 4 * (yBase - yTop);
+            const n = _nivelDe(niveles, valor);
+            const color = n ? n.color : '#94a3b8';
+            let s = `<defs>
+                <linearGradient id="${{svgId}}-vidrio" x1="0" x2="1"><stop offset="0%" stop-color="#f8fafc"/><stop offset="50%" stop-color="#e5e7eb"/><stop offset="100%" stop-color="#f8fafc"/></linearGradient>
+                <linearGradient id="${{svgId}}-brillo" x1="0" x2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.65"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+                <radialGradient id="${{svgId}}-bulbo" cx="42%" cy="40%" r="62%"><stop offset="0%" stop-color="${{color}}" stop-opacity="0.82"/><stop offset="60%" stop-color="${{color}}"/><stop offset="100%" stop-color="${{color}}"/></radialGradient>
+                <radialGradient id="${{svgId}}-sombra" cx="50%" cy="50%" r="50%"><stop offset="70%" stop-color="#000000" stop-opacity="0"/><stop offset="100%" stop-color="#000000" stop-opacity="0.10"/></radialGradient></defs>`;
+            // Tubo de vidrio
+            s += `<rect x="${{x - 4}}" y="${{yTop - 14}}" width="${{w + 8}}" height="${{bcy - yTop + 8}}" rx="${{(w + 8) / 2}}" fill="#cfd5dc"/>`;
+            s += `<circle cx="${{x + w / 2}}" cy="${{bcy}}" r="${{br + 6}}" fill="#cfd5dc"/>`;
+            s += `<rect x="${{x}}" y="${{yTop - 10}}" width="${{w}}" height="${{bcy - yTop}}" rx="${{w / 2}}" fill="url(#${{svgId}}-vidrio)"/>`;
+            // Bandas de nivel a la izquierda del tubo (CAMEL_Niveles)
+            (niveles || []).forEach(nv => {{
+                const y1 = yDe(Math.min(5, nv.hasta === null ? 5 : nv.hasta)), y2 = yDe(Math.max(1, nv.desde === null ? 1 : nv.desde));
+                s += `<rect x="${{x - 22}}" y="${{y1.toFixed(1)}}" width="8" height="${{(y2 - y1).toFixed(1)}}" rx="3" fill="${{nv.color}}" opacity="0.85"/>`;
+                const yMedio = y2 - y1 > 4 ? (y1 + y2) / 2 : y1 - 2;
+                s += `<text x="${{x - 28}}" y="${{(yMedio + 3.5).toFixed(1)}}" text-anchor="end" font-size="10.5" font-weight="700" fill="${{nv.color}}" font-family="Poppins, sans-serif">${{nv.nivel}}</text>`;
+            }});
+            // Líquido
+            if (valor !== null && valor !== undefined) {{
+                const yv = yDe(valor);
+                s += `<rect x="${{x + 7}}" y="${{yv.toFixed(1)}}" width="${{w - 14}}" height="${{(bcy - yv).toFixed(1)}}" rx="${{(w - 14) / 2}}" fill="${{color}}"/>`;
+            }}
+            s += `<circle cx="${{x + w / 2}}" cy="${{bcy}}" r="${{br}}" fill="${{color}}"/>`;
+            s += `<circle cx="${{x + w / 2}}" cy="${{bcy}}" r="${{br}}" fill="url(#${{svgId}}-bulbo)"/>`;
+            s += `<circle cx="${{x + w / 2}}" cy="${{bcy}}" r="${{br}}" fill="url(#${{svgId}}-sombra)"/>`;
+            s += `<rect x="${{x + 6}}" y="${{yTop - 4}}" width="5" height="${{Math.max(0, bcy - br - yTop - 2)}}" rx="2.5" fill="url(#${{svgId}}-brillo)" opacity="0.6"/>`;
+            // Escala 1 a 5
+            for (let k = 0; k <= 16; k++) {{
+                const v = 1 + k * 0.25, y = yDe(v), entero = k % 4 === 0, medio = k % 2 === 0;
+                s += `<line x1="${{x + w + 6}}" y1="${{y.toFixed(1)}}" x2="${{x + w + 6 + (entero ? 16 : medio ? 11 : 6)}}" y2="${{y.toFixed(1)}}" stroke="#94a3b8" stroke-width="${{entero ? 2 : 1}}"/>`;
+                if (entero) s += `<text x="${{x + w + 30}}" y="${{(y + 4).toFixed(1)}}" font-size="13" font-weight="700" fill="#475569" font-family="Poppins, sans-serif">${{Math.round(v)}}</text>`;
+            }}
+            // Marcador del valor
+            if (valor !== null && valor !== undefined) {{
+                const yv = yDe(valor);
+                s += `<polygon points="${{x + w + 6}},${{yv.toFixed(1)}} ${{x + w + 16}},${{(yv - 6).toFixed(1)}} ${{x + w + 16}},${{(yv + 6).toFixed(1)}}" fill="${{color}}"/>`;
+                s += `<rect x="${{x + w + 46}}" y="${{(yv - 15).toFixed(1)}}" width="62" height="30" rx="7" fill="#111827"/>
+                      <text x="${{x + w + 77}}" y="${{(yv + 6).toFixed(1)}}" text-anchor="middle" font-size="16" font-weight="700" fill="#f8fafc" font-family="'JetBrains Mono', monospace">${{_fmt2(valor)}}</text>`;
+            }}
+            s += `<text x="${{x + w / 2}}" y="${{bcy + br + 22}}" text-anchor="middle" font-size="14" font-weight="800" fill="#B5452B" font-family="Poppins, sans-serif" letter-spacing="1">CAMEL</text>`;
+            document.getElementById(svgId).innerHTML = s;
+        }}
+
+        // ---------- MAT ----------
+        function abrirMAT() {{ _abrirMC('mat', 'mat-root', renderMAT); }}
+        function renderMAT() {{
+            const st = MC_STATE.mat, i = st.idx, r = DATOS_MATCAMEL[i], p = i > 0 ? DATOS_MATCAMEL[i - 1] : null;
+            const m = r.mat;
+            _versionMC('mat', r);
+            _dibujarVelocimetro('mat-gauge', m.escala, m.niveles);
+            document.getElementById('mat-kpis').innerHTML =
+                _kpiMC('Probabilidad de quiebra', m.escala, p ? p.mat.escala : null, `${{_etqLargaMC(r)}} · escala 0-100`, _fmt2(m.escala), true, m.color) +
+                _kpiMC('Nivel de alerta', null, null, 'según la hoja MAT_Niveles', `<span class="mc-nivel" style="background:${{m.color}};font-size:16px;">${{m.nivel || '—'}}</span>`, false, m.color);
+            const etqAnt = p ? _etqLargaMC(p) : 'sin mes anterior';
+            document.getElementById('mat-tabla-sub').textContent = `${{_etqLargaMC(r)}} · variaciones frente a ${{etqAnt}} · parámetros versión ${{r.version}}`;
+            const celdaVar = (a, b, sentido) => {{
+                if (a === null || b === null || a === undefined || b === undefined) return '<td class="num">—</td>';
+                const dlt = a - b, sem = _semaforoEEFF(dlt, dlt * 5, sentido);
+                return `<td class="num" style="color:${{sem ? sem.color : '#64748b'}};font-weight:700;">${{sem ? sem.flecha + ' ' : ''}}${{dlt >= 0 ? '+' : ''}}${{(dlt * 100).toFixed(2).replace('.', ',')}} pts</td>`;
+            }};
+            const fmtCoef = v => v.toLocaleString('de-DE', {{ maximumFractionDigits: 8 }});
+            let h = `<thead><tr><th>Variable</th><th>Fórmula</th><th class="num">Valor</th><th class="num">Coeficiente</th><th class="num">Aporte a z</th><th class="num">Var. valor</th></tr></thead><tbody>`;
+            m.aportes.forEach(a => {{
+                const v = r.variables[a.variable] || {{}};
+                const ant = p && p.variables[a.variable] ? p.variables[a.variable].valor : null;
+                const formula = v.formula || ((v.numerador || '') + (v.denominador ? ' / ' + v.denominador : ''));
+                // Semáforo: si el coeficiente es negativo, que la variable suba es favorable
+                h += `<tr><td>${{a.nombre}}</td><td style="color:#64748b;">${{formula}}</td><td class="num">${{_fmtVarMC(a.valor, v.formato)}}</td>
+                      <td class="num">${{fmtCoef(a.coeficiente)}}</td><td class="num">${{_fmt4(a.aporte)}}</td>
+                      ${{celdaVar(a.valor, ant, a.coeficiente < 0 ? 1 : -1)}}</tr>`;
+            }});
+            const intercepto = m.z - m.aportes.reduce((s, a) => s + (a.aporte || 0), 0);
+            h += `<tr><td>Intercepto</td><td></td><td class="num"></td><td class="num">${{fmtCoef(intercepto)}}</td><td class="num">${{_fmt4(intercepto)}}</td><td class="num"></td></tr>`;
+            h += `<tr class="solv-total"><td>z (logit)</td><td></td><td class="num"></td><td class="num"></td><td class="num">${{_fmt4(m.z)}}</td><td class="num"></td></tr>`;
+            const dMat = p ? m.escala - p.mat.escala : null;
+            h += `<tr class="solv-clave"><td>Probabilidad de quiebra (0-100)</td><td style="color:#64748b;">1 / (1 + e^-z) × 100</td>
+                  <td class="num" style="color:${{m.color}};font-weight:800;">${{_fmt2(m.escala)}}${{_lupaMC(`verNivelesMC('mat')`)}}</td><td></td><td></td>
+                  <td class="num" style="color:${{dMat === null ? '#64748b' : (dMat > 0 ? '#C91A15' : '#15803D')}};font-weight:700;">${{dMat === null ? '—' : (dMat > 0 ? '▲ +' : '▼ ') + _fmt2(dMat)}}</td></tr></tbody>`;
+            document.getElementById('mat-tabla').innerHTML = h;
+            // Histórico: columnas por nivel de riesgo
+            _graficoNivelesMC('mat');
+            _tableroMC('mat');
+        }}
+
+        // ---------- CAMEL ----------
+        function abrirCAMEL() {{ _abrirMC('camel', 'camel-root', renderCAMEL); }}
+        function renderCAMEL() {{
+            const st = MC_STATE.camel, i = st.idx, r = DATOS_MATCAMEL[i], p = i > 0 ? DATOS_MATCAMEL[i - 1] : null;
+            const c = r.camel;
+            _versionMC('camel', r);
+            _dibujarTermometro('camel-termo', c.promedio, c.niveles);
+            document.getElementById('camel-kpis').innerHTML =
+                _kpiMC('Calificación CAMEL', c.promedio, p ? p.camel.promedio : null, `${{_etqLargaMC(r)}} · escala 1-5`, _fmt2(c.promedio), true, c.color) +
+                _kpiMC('Índice único', null, null, 'según la hoja CAMEL_Niveles', `<span class="mc-nivel" style="background:${{c.color}};font-size:16px;">${{c.nivel || '—'}}</span>`, false, c.color) +
+                _kpiMC('Costo de agencia', c.costo_agencia, p ? p.camel.costo_agencia : null, 'promedio de los indicadores de administración', _fmt2(c.costo_agencia), false, '#64748b');
+            const chip = v => {{
+                if (v === null || v === undefined) return '—';
+                const n = _nivelDe(c.niveles, v);
+                return `<span class="mc-chip" style="background:${{n ? n.color : '#94a3b8'}};">${{Number.isInteger(v) ? v : _fmt2(v)}}</span>`;
+            }};
+            document.getElementById('camel-tabla-sub').textContent = `${{_etqLargaMC(r)}} · parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}})`;
+            let h = `<thead><tr><th>Componente</th><th>Indicador</th><th class="num">Valor</th><th>Regla aplicada</th><th class="num">Puntaje</th><th class="num">Mes ant.</th></tr></thead><tbody>`;
+            c.indicadores.forEach(x => {{
+                const v = r.variables[x.variable] || {{}};
+                const ant = p ? (p.camel.indicadores.find(y => y.variable === x.variable) || {{}}).puntaje : null;
+                const esAgencia = x.grupo.toLowerCase().startsWith('costo');
+                h += `<tr><td>${{x.componente || ''}}${{esAgencia ? ' (costo de agencia)' : ''}}</td>
+                      <td>${{x.nombre}}</td><td class="num">${{_fmtVarMC(x.valor, v.formato)}}</td><td style="color:#64748b;">${{x.regla || '—'}}</td>
+                      <td class="num">${{chip(x.puntaje)}}${{_lupaMC(`verRangosCAMEL('${{x.variable}}')`)}}</td><td class="num">${{chip(ant)}}</td></tr>`;
+            }});
+            h += `<tr class="solv-total"><td>Administración</td><td>Costo de agencia (promedio)</td><td></td><td style="color:#64748b;">Promedio de los indicadores de administración</td>
+                  <td class="num">${{chip(c.costo_agencia)}}${{_lupaMC(`verNivelesMC('costo')`)}}</td><td class="num">${{chip(p ? p.camel.costo_agencia : null)}}</td></tr>`;
+            h += `<tr class="solv-clave"><td>CAMEL</td><td>Calificación promedio</td><td></td><td style="color:#64748b;">Promedio de los indicadores principales y el costo de agencia</td>
+                  <td class="num">${{chip(c.promedio)}}${{_lupaMC(`verNivelesMC('promedio')`)}}</td><td class="num">${{chip(p ? p.camel.promedio : null)}}</td></tr></tbody>`;
+            document.getElementById('camel-tabla').innerHTML = h;
+            // Puntajes de los últimos 13 meses
+            const desde = Math.max(0, i - 12), ult = DATOS_MATCAMEL.slice(desde, i + 1);
+            let hh = `<thead><tr><th>Indicador</th>${{ult.map(x => `<th>${{_etqMC(x)}}</th>`).join('')}}</tr></thead><tbody>`;
+            c.indicadores.forEach(x => {{
+                hh += `<tr><td>${{x.nombre}}</td>${{ult.map(y => {{
+                    const it = y.camel.indicadores.find(z => z.variable === x.variable);
+                    return `<td>${{chip(it ? it.puntaje : null)}}</td>`;
+                }}).join('')}}</tr>`;
+            }});
+            hh += `<tr class="solv-total"><td>Costo de agencia</td>${{ult.map(y => `<td>${{chip(y.camel.costo_agencia)}}</td>`).join('')}}</tr>`;
+            hh += `<tr class="solv-clave"><td>Calificación CAMEL</td>${{ult.map(y => `<td>${{chip(y.camel.promedio)}}</td>`).join('')}}</tr></tbody>`;
+            document.getElementById('camel-hist').innerHTML = hh;
+            // Histórico: columnas por nivel de riesgo
+            _graficoNivelesMC('camel');
+            _tableroMC('camel');
+        }}
+
+
+
+        // ---------- Gráfico histórico por niveles (columnas + franjas de nivel de fondo) ----------
+        const MC_ANCHO_COL = 62;
+        const _serieMC = clave => DATOS_MATCAMEL.map(x => clave === 'mat' ? x.mat.escala : x.camel.promedio);
+        const _nivelesMC = (clave, i) => clave === 'mat' ? DATOS_MATCAMEL[i].mat.niveles : DATOS_MATCAMEL[i].camel.niveles;
+        const _nombreMC = clave => clave === 'mat' ? 'MAT · Probabilidad de quiebra' : 'CAMEL · Calificación promedio';
+        function _rangoYMC(clave, valores) {{
+            if (clave === 'camel') return {{ min: 1, max: 5.4 }};
+            const max = Math.max(...valores.filter(v => v !== null && !isNaN(v)), 0);
+            return {{ min: 0, max: Math.max(20, Math.ceil(max * 1.3 / 5) * 5) }};
+        }}
+        // Franjas de color de cada nivel (MAT_Niveles / CAMEL_Niveles) detrás de las columnas
+        const PLUGIN_ZONAS_MC = {{
+            id: 'zonasMC',
+            // Pinta los valores del eje vertical en una columna fija fuera del desplazamiento
+            afterLayout(chart, args, opts) {{
+                if (!opts.ejeId) return;
+                const el = document.getElementById(opts.ejeId), y = chart.scales.y;
+                if (!el || !y) return;
+                el.innerHTML = y.ticks.map(t => `<span style="top:${{y.getPixelForValue(t.value).toFixed(1)}}px">${{(opts.fmtEje || _fmt2)(t.value)}}</span>`).join('');
+            }},
+            beforeDatasetsDraw(chart, args, opts) {{
+                const {{ ctx, chartArea: a, scales: {{ y }} }} = chart;
+                (opts.niveles || []).forEach(n => {{
+                    const d = Math.max(n.desde === null ? y.min : n.desde, y.min);
+                    const h = Math.min(n.hasta === null ? y.max : n.hasta, y.max);
+                    if (h <= d) return;
+                    const y1 = y.getPixelForValue(h), y2 = y.getPixelForValue(d);
+                    ctx.save();
+                    const grad = ctx.createLinearGradient(0, y1, 0, y2);
+                    grad.addColorStop(0, n.color + '1C');
+                    grad.addColorStop(1, n.color + '0A');
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(a.left, y1, a.right - a.left, y2 - y1);
+                    ctx.restore();
+                }});
+            }}
+        }};
+        function _configGraficoMC(clave, idxs, idxActual, paraCopia) {{
+            const st = MC_STATE[clave], serie = _serieMC(clave);
+            const datos = idxs.map(i => serie[i]);
+            const rango = _rangoYMC(clave, datos);
+            const colorDe = (v, i) => {{
+                const base = st.paleta === 'nivel' ? ((_nivelDe(_nivelesMC(clave, i), v) || {{}}).color || '#94a3b8') : st.paleta;
+                return i === idxActual ? base : base + 'B8';
+            }};
+            const esAct = c => idxs[c.dataIndex] === idxActual;
+            return {{
+                type: 'bar',
+                data: {{
+                    labels: idxs.map(i => _etqMC(DATOS_MATCAMEL[i])),
+                    datasets: [{{
+                        label: _nombreMC(clave), data: datos,
+                        backgroundColor: idxs.map((i, k) => colorDe(datos[k], i)),
+                        borderColor: idxs.map(i => i === idxActual ? '#1f2937' : 'rgba(0,0,0,0)'),
+                        borderWidth: idxs.map(i => i === idxActual ? 2 : 0),
+                        borderRadius: 6, borderSkipped: false, maxBarThickness: 38, categoryPercentage: 0.72, barPercentage: 0.9
+                    }}]
+                }},
+                options: {{
+                    responsive: !paraCopia, maintainAspectRatio: false, devicePixelRatio: paraCopia ? 2 : undefined,
+                    animation: paraCopia ? false : {{ duration: 400 }},
+                    layout: {{ padding: {{ top: 26, left: 6, right: 6, bottom: 2 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        zonasMC: {{ niveles: _nivelesMC(clave, idxActual), ejeId: paraCopia ? null : clave + '-eje' }},
+                        tooltip: {{
+                            backgroundColor: '#1c2520', padding: 10, cornerRadius: 8,
+                            callbacks: {{
+                                title: it => it.length ? _etqLargaMC(DATOS_MATCAMEL[idxs[it[0].dataIndex]]) : '',
+                                label: c => {{
+                                    const n = _nivelDe(_nivelesMC(clave, idxs[c.dataIndex]), c.parsed.y);
+                                    return ` ${{_fmt2(c.parsed.y)}} · ${{n ? n.nivel : ''}}`;
+                                }}
+                            }}
+                        }},
+                        datalabels: {{
+                            display: c => esAct(c) ? true : 'auto',
+                            anchor: 'end', align: 'top', offset: 3, clamp: true, clip: false,
+                            formatter: v => _fmt2(v),
+                            color: c => esAct(c) ? '#0f172a' : '#475569',
+                            font: c => ({{ size: paraCopia ? 12.5 : 11.5, weight: esAct(c) ? '800' : '600' }})
+                        }}
+                    }},
+                    scales: {{
+                        y: {{ min: rango.min, max: rango.max, display: true, grid: {{ color: '#f1f5f9' }}, border: {{ display: false }},
+                              ticks: {{ display: !!paraCopia, stepSize: clave === 'camel' ? 0.5 : undefined,
+                                        callback: v => _fmt2(v), font: {{ size: 11 }}, color: '#94a3b8' }} }},
+                        x: {{ grid: {{ display: false }}, border: {{ color: '#e2e8f0' }},
+                              ticks: {{ maxRotation: 0, autoSkip: false, font: c => ({{ size: paraCopia ? 11.5 : 10.5, weight: idxs[c.index] === idxActual ? '800' : '500' }}),
+                                        color: c => idxs[c.index] === idxActual ? '#B5452B' : '#64748b' }} }}
+                    }},
+                    onClick: paraCopia ? undefined : (e, els) => {{
+                        if (!els.length) return;
+                        const p = DATOS_MATCAMEL[idxs[els[0].index]];
+                        document.getElementById(clave + '-filtro-anio').value = p.anio;
+                        document.getElementById(clave + '-filtro-anio').onchange();
+                        document.getElementById(clave + '-filtro-mes').value = p.mes;
+                        document.getElementById(clave + '-filtro-mes').onchange();
+                    }}
+                }},
+                plugins: [PLUGIN_ZONAS_MC]
+            }};
+        }}
+        // Texto de un rango sin límites repetidos: "≥ 1,00 a < 2,00", "< 2,00", "≥ 5,00"
+        function _textoRangoMC(desde, hasta, fmt) {{
+            if (desde === null && hasta === null) return 'Cualquier valor';
+            if (desde === null) return `< ${{fmt(hasta)}}`;
+            if (hasta === null) return `≥ ${{fmt(desde)}}`;
+            return `≥ ${{fmt(desde)}} a < ${{fmt(hasta)}}`;
+        }}
+        function _leyendaNivelesMC(niveles) {{
+            const txt = nv => _textoRangoMC(nv.desde, nv.hasta, _fmt2);
+            return niveles.map(nv => `<span><i style="background:${{nv.color}}"></i>${{nv.nivel}} · ${{txt(nv)}}</span>`).join('');
+        }}
+        function _graficoNivelesMC(clave) {{
+            const st = MC_STATE[clave], n = DATOS_MATCAMEL.length;
+            const scroll = document.getElementById(clave + '-graf-scroll'), inner = document.getElementById(clave + '-graf-inner');
+            inner.style.width = Math.max(scroll.clientWidth || 900, n * MC_ANCHO_COL) + 'px';
+            if (st.chart) st.chart.destroy();
+            st.chart = new Chart(document.getElementById('chart' + clave.toUpperCase()), _configGraficoMC(clave, [...Array(n).keys()], st.idx, false));
+            document.getElementById(clave + '-leyenda').innerHTML = _leyendaNivelesMC(_nivelesMC(clave, st.idx));
+            const ir = () => {{ scroll.scrollLeft = Math.max(0, (st.idx + 3) * MC_ANCHO_COL - scroll.clientWidth); }};
+            ir(); setTimeout(ir, 80);
+        }}
+        function cambiarPaletaMC(clave, valor) {{
+            MC_STATE[clave].paleta = valor;
+            _graficoNivelesMC(clave);
+        }}
+
+        // ---------- Copiar gráficos e instrumentos como imagen ----------
+        // Lienzo blanco con título, subtítulo y leyenda de niveles, listo para pegar.
+        function _lienzoCopiaMC(titulo, subtitulo, niveles, ancho, altoContenido, acento) {{
+            const S = 2, PAD = 24, ALTO_TIT = 62, ALTO_LEY = niveles && niveles.length ? 28 : 0, ALTO_PIE = 26;
+            const W = ancho + PAD * 2, H = PAD + ALTO_TIT + ALTO_LEY + altoContenido + ALTO_PIE;
+            const cv = document.createElement('canvas'); cv.width = W * S; cv.height = H * S;
+            const g = cv.getContext('2d'); g.scale(S, S); g.textBaseline = 'middle';
+            const F = "'Poppins', 'Segoe UI', Arial, sans-serif";
+            g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+            g.strokeStyle = '#efe4dd'; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+            g.fillStyle = acento || '#B5452B'; g.fillRect(PAD, PAD + 4, 4, 26);
+            g.font = `700 17px ${{F}}`; g.fillStyle = '#0f172a'; g.fillText(titulo, PAD + 14, PAD + 12);
+            g.font = `500 11.5px ${{F}}`; g.fillStyle = '#64748b'; g.fillText(subtitulo, PAD + 14, PAD + 34);
+            let x = PAD, y = PAD + ALTO_TIT + 4;
+            (niveles || []).forEach(nv => {{
+                const t = nv.nivel;
+                g.font = `600 11px ${{F}}`;
+                const w = g.measureText(t).width + 30;
+                g.fillStyle = '#f8fafc'; g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, 20, 10); else g.rect(x, y, w, 20); g.fill();
+                g.fillStyle = nv.color; g.fillRect(x + 8, y + 5, 10, 10);
+                g.fillStyle = '#475569'; g.fillText(t, x + 23, y + 10.5);
+                x += w + 8;
+            }});
+            const yContenido = PAD + ALTO_TIT + ALTO_LEY;
+            g.font = `500 10px ${{F}}`; g.fillStyle = '#94a3b8'; g.fillText('FEBOR · Indicadores Financieros', PAD, H - ALTO_PIE / 2);
+            return {{ cv, g, x: PAD, y: yContenido }};
+        }}
+        function copiarGraficoMC(clave) {{
+            const st = MC_STATE[clave], n = DATOS_MATCAMEL.length;
+            const visible = _visibleScrollMC(document.getElementById(clave + '-graf-scroll'), n);
+            abrirModalCopia({{ generar: async (rango) => {{
+                const idxs = _idxsRangoMC(rango, st.idx, visible);
+                const W = Math.max(760, idxs.length * 72), H = 360;
+                const temp = document.createElement('canvas'); temp.width = W; temp.height = H;
+                const chart = new Chart(temp, _configGraficoMC(clave, idxs, st.idx, true));
+                const r = DATOS_MATCAMEL[st.idx];
+                const titulo = `Evolución histórica · ${{_nombreMC(clave)}}`;
+                const subtitulo = `${{_txtRangoMC(rango, idxs)}} · parámetros versión ${{r.version}}`;
+                const L = _lienzoCopiaMC(titulo, subtitulo, _nivelesMC(clave, st.idx), W, H);
+                L.g.drawImage(chart.canvas, L.x, L.y, W, H);
+                chart.destroy();
+                const serie = _serieMC(clave);
+                const filas = idxs.map(i => [_etqLargaMC(DATOS_MATCAMEL[i]), _fmt2(serie[i]), (_nivelDe(_nivelesMC(clave, i), serie[i]) || {{}}).nivel || '']);
+                const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;border-bottom:1px solid #eee;';
+                const html = `<table style="border-collapse:collapse;"><tr><td colspan="3" style="${{base}}font-weight:bold;color:#B5452B;font-size:12pt;">${{titulo}}</td></tr>`
+                    + `<tr>${{['Mes', 'Valor', 'Nivel'].map(h => `<td style="${{base}}background:#B5452B;color:#fff;font-weight:bold;">${{h}}</td>`).join('')}}</tr>`
+                    + filas.map(f => `<tr>${{f.map((c, j) => `<td style="${{base}}text-align:${{j === 1 ? 'right' : 'left'}};">${{c}}</td>`).join('')}}</tr>`).join('') + '</table>';
+                const texto = [titulo, 'Mes\\tValor\\tNivel', ...filas.map(f => f.join('\\t'))].join('\\n');
+                return {{ titulo, subtitulo, canvas: L.cv, html, texto, archivo: `${{clave.toUpperCase()}}_historico_${{rango}}.png` }};
+            }} }});
+        }}
+        // Copiar el tablero histórico (tabla) con el rango elegido
+        function copiarTableroMC(clave) {{
+            const st = MC_STATE[clave], n = DATOS_MATCAMEL.length;
+            const tabla = document.getElementById(clave + '-tablero'), wrap = tabla.parentElement;
+            const fija = tabla.querySelector('th.mc-tab-fija').offsetWidth;
+            const visible = _visibleScrollMC(wrap, n, fija);
+            const datos = _leerTablaDOM(tabla);
+            abrirModalCopia({{ generar: async (rango) => {{
+                const idxs = _idxsRangoMC(rango, st.idx, visible);
+                const d = {{ enc: [datos.enc[0], ...idxs.map(i => datos.enc[i + 1])],
+                            filas: datos.filas.map(f => ({{ clase: f.clase, celdas: [f.celdas[0], ...idxs.map(i => f.celdas[i + 1])] }})) }};
+                const titulo = `Tablero histórico · ${{clave === 'mat' ? 'MAT' : 'CAMEL'}}`;
+                const subtitulo = _txtRangoMC(rango, idxs);
+                const bloques = [{{ titulo: 'Indicadores', datos: d }}];
+                const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#B5452B');
+                const {{ html, texto }} = _htmlExcelBloques(titulo, subtitulo, bloques, '#B5452B');
+                return {{ titulo, subtitulo, canvas, html, texto, archivo: `Tablero_${{clave.toUpperCase()}}_${{rango}}.png` }};
+            }} }});
+        }}
+        async function copiarInstrumentoMC(clave) {{
+            const svg = document.getElementById(clave === 'mat' ? 'mat-gauge' : 'camel-termo');
+            const vb = svg.viewBox.baseVal, esc = 2.2;
+            const clon = svg.cloneNode(true);
+            clon.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            clon.setAttribute('width', vb.width * esc); clon.setAttribute('height', vb.height * esc);
+            const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clon));
+            const img = await new Promise((ok, mal) => {{ const im = new Image(); im.onload = () => ok(im); im.onerror = mal; im.src = url; }});
+            const r = DATOS_MATCAMEL[MC_STATE[clave].idx];
+            const valor = clave === 'mat' ? r.mat.escala : r.camel.promedio;
+            const n = _nivelDe(_nivelesMC(clave, MC_STATE[clave].idx), valor);
+            const titulo = clave === 'mat' ? 'MAT · Modelo de Alerta Temprana' : 'CAMEL · Calificación promedio';
+            const subtitulo = `${{_etqLargaMC(r)}} · ${{_fmt2(valor)}} · ${{n ? n.nivel : ''}} · parámetros versión ${{r.version}}`;
+            const W = Math.max(420, vb.width * 1.6), H = vb.height * 1.6;
+            const L = _lienzoCopiaMC(titulo, subtitulo, _nivelesMC(clave, MC_STATE[clave].idx), W, H);
+            L.g.drawImage(img, L.x + (W - vb.width * 1.6) / 2, L.y, vb.width * 1.6, H);
+            const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;';
+            const html = `<table style="border-collapse:collapse;"><tr><td style="${{base}}font-weight:bold;">${{titulo}}</td></tr><tr><td style="${{base}}">${{subtitulo}}</td></tr></table>`;
+            abrirModalCopia({{ titulo, subtitulo, canvas: L.cv, html, texto: `${{titulo}}\\n${{subtitulo}}`, archivo: `${{clave.toUpperCase()}}_${{_etqMC(r)}}.png` }});
+        }}
+
+
+        // ---------- Tablero histórico de indicadores (MAT / CAMEL) ----------
+        // Filas: indicadores · columnas: todos los meses · lupa = gráfica histórica del indicador.
+        function _filasTableroMC(clave) {{
+            const ult = DATOS_MATCAMEL[DATOS_MATCAMEL.length - 1];
+            const fmtDe = formato => v => _fmtVarMC(v, formato);
+            const filas = [];
+            if (clave === 'mat') {{
+                ult.mat.aportes.forEach(a => {{
+                    const formato = (ult.variables[a.variable] || {{}}).formato;
+                    filas.push({{ id: a.variable, nombre: a.nombre, formato,
+                                  valor: r => (r.variables[a.variable] || {{}}).valor ?? null, fmt: fmtDe(formato) }});
+                }});
+                filas.push({{ id: '_z', nombre: 'Logit (z)', formato: 'veces', valor: r => r.mat.z, fmt: _fmt4, estilo: 'solv-total' }});
+                filas.push({{ id: '_mat', nombre: 'Probabilidad de quiebra (0-100)', formato: 'escala', valor: r => r.mat.escala, fmt: _fmt2,
+                              estilo: 'solv-clave', niveles: r => r.mat.niveles }});
+            }} else {{
+                ult.camel.indicadores.forEach(x => {{
+                    const formato = (ult.variables[x.variable] || {{}}).formato;
+                    filas.push({{ id: x.variable, nombre: x.nombre, formato,
+                                  valor: r => ((r.camel.indicadores.find(i => i.variable === x.variable)) || {{}}).valor ?? null,
+                                  puntaje: r => ((r.camel.indicadores.find(i => i.variable === x.variable)) || {{}}).puntaje ?? null,
+                                  fmt: fmtDe(formato) }});
+                }});
+                filas.push({{ id: '_agencia', nombre: 'Costo de agencia', formato: 'escala', valor: r => r.camel.costo_agencia, fmt: _fmt2,
+                              estilo: 'solv-total', niveles: r => r.camel.niveles, conChip: true }});
+                filas.push({{ id: '_camel', nombre: 'Calificación CAMEL', formato: 'escala', valor: r => r.camel.promedio, fmt: _fmt2,
+                              estilo: 'solv-clave', niveles: r => r.camel.niveles, conChip: true }});
+            }}
+            return filas;
+        }}
+        function _tableroMC(clave) {{
+            const st = MC_STATE[clave], filas = _filasTableroMC(clave);
+            const chipColor = (r, pt) => ((_nivelDe(r.camel.niveles, pt) || {{}}).color || '#94a3b8');
+            let h = `<thead><tr><th class="mc-tab-fija">Indicador</th>${{DATOS_MATCAMEL.map((r, i) =>
+                `<th class="${{i === st.idx ? 'mc-tab-actual' : ''}}${{r.mes === 'ENERO' && i > 0 ? ' mc-tab-anio' : ''}}">${{_etqMC(r)}}</th>`).join('')}}</tr></thead><tbody>`;
+            filas.forEach(f => {{
+                h += `<tr class="${{f.estilo || ''}}"><td class="mc-tab-fija">${{_lupaMC(`verHistoricoMC('${{clave}}', '${{f.id}}')`)}} ${{f.nombre}}</td>`;
+                DATOS_MATCAMEL.forEach((r, i) => {{
+                    const v = f.valor(r);
+                    let celda = f.fmt(v);
+                    if (f.puntaje) {{
+                        const pt = f.puntaje(r);
+                        if (pt !== null) celda = `<span class="mc-punto" style="background:${{chipColor(r, pt)}}" title="Puntaje ${{pt}}"></span>${{celda}}`;
+                    }} else if (f.conChip && v !== null) {{
+                        celda = `<span class="mc-punto" style="background:${{chipColor(r, v)}}"></span>${{celda}}`;
+                    }} else if (f.niveles && v !== null) {{
+                        const n = _nivelDe(f.niveles(r), v);
+                        if (n) celda = `<span class="mc-punto" style="background:${{n.color}}" title="${{n.nivel}}"></span>${{celda}}`;
+                    }}
+                    h += `<td class="num${{i === st.idx ? ' mc-tab-actual' : ''}}${{r.mes === 'ENERO' && i > 0 ? ' mc-tab-anio' : ''}}">${{celda}}</td>`;
+                }});
+                h += '</tr>';
+            }});
+            const tabla = document.getElementById(clave + '-tablero');
+            tabla.innerHTML = h + '</tbody>';
+            const wrap = tabla.parentElement;
+            const ir = () => {{
+                const th = tabla.querySelector('th.mc-tab-actual');
+                wrap.scrollLeft = th ? Math.max(0, th.offsetLeft + th.offsetWidth - wrap.clientWidth + 40) : wrap.scrollWidth;
+            }};
+            ir(); setTimeout(ir, 80);
+        }}
+
+        // Lupa del tablero: gráfica histórica del indicador (6 meses visibles, con desplazamiento)
+        let MC_CHART_MODAL = null;
+        const MC_MODAL = {{ clave: null, id: null, color: '#E0703A' }};
+        const PALETAS_MC = [['#E0703A', 'Naranja'], ['#B5452B', 'Terracota'], ['#F28C6B', 'Coral'], ['#C91A15', 'Rojo'], ['#9B2242', 'Vino'], ['#D9578F', 'Rosa'], ['#E3B23C', 'Dorado'], ['#F2C230', 'Amarillo'], ['#8BC34A', 'Verde lima'], ['#17A53D', 'Verde'], ['#0F7A5A', 'Esmeralda'], ['#7A8B3A', 'Oliva'], ['#2A9D8F', 'Turquesa'], ['#1F7A8C', 'Azul petróleo'], ['#088DD5', 'Azul'], ['#1E3A8A', 'Azul marino'], ['#4F46E5', 'Índigo'], ['#6039A3', 'Morado'], ['#A78BDA', 'Lavanda'], ['#8D6E63', 'Café'], ['#64748B', 'Gris'], ['#334155', 'Grafito']];
+        const _opcionesPaletaMC = sel => PALETAS_MC.map(([c, nm]) => `<option value="${{c}}"${{c === sel ? ' selected' : ''}}>${{nm}}</option>`).join('');
+        function _datosHistoricoMC(clave, id) {{
+            const st = MC_STATE[clave], fila = _filasTableroMC(clave).find(f => f.id === id);
+            const r = DATOS_MATCAMEL[st.idx];
+            const aGraf = v => v === null || v === undefined ? null : (fila.formato === '%' ? v * 100 : fila.formato === 'monto' ? v / 1e6 : v);
+            const fmtG = v => v === null || v === undefined ? '' : (fila.formato === '%' ? v.toFixed(2).replace('.', ',') + '%'
+                : fila.formato === 'monto' ? fmtMillEnt(v) : (id === '_z' ? v.toFixed(4).replace('.', ',') : _fmt2(v)));
+            const serie = DATOS_MATCAMEL.map(x => aGraf(fila.valor(x)));
+            let zonas = [];
+            if (fila.niveles) zonas = fila.niveles(r);
+            else if (clave === 'camel' && !id.startsWith('_')) {{
+                const ind = r.camel.indicadores.find(i => i.variable === id);
+                const mult = /m[ií]nimo/i.test(ind.unidad || '') ? r.camel.minimo_legal : 1;
+                const conv = l => l === null ? null : aGraf(l * mult);
+                zonas = ind.rangos.map(rg => ({{ desde: conv(rg.desde), hasta: conv(rg.hasta),
+                                               color: (_nivelDe(r.camel.niveles, rg.puntaje) || {{}}).color || '#94a3b8', nivel: `Puntaje ${{rg.puntaje}}` }}));
+            }}
+            return {{ fila, r, fmtG, serie, zonas }};
+        }}
+        function _configLineaMC(d, idxs, idxActual, color, paraCopia, ejeId) {{
+            const datos = idxs.map(i => d.serie[i]);
+            const pos = idxs.indexOf(idxActual);
+            return {{
+                type: 'line',
+                data: {{ labels: idxs.map(i => _etqMC(DATOS_MATCAMEL[i])), datasets: [{{
+                    data: datos, borderColor: color, borderWidth: 2.4, cubicInterpolationMode: 'monotone',
+                    fill: true, backgroundColor: c => gradienteArea(c, color),
+                    pointRadius: idxs.map(i => i === idxActual ? 6 : 3), pointBackgroundColor: idxs.map(i => i === idxActual ? '#1f2937' : color),
+                    pointBorderColor: '#ffffff', pointBorderWidth: 1.5
+                }}] }},
+                options: {{
+                    responsive: !paraCopia, maintainAspectRatio: false, devicePixelRatio: paraCopia ? 2 : undefined,
+                    animation: paraCopia ? false : {{ duration: 300 }},
+                    interaction: {{ mode: 'index', intersect: false }},
+                    layout: {{ padding: {{ top: 38, right: 56, left: 24, bottom: 4 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        zonasMC: {{ niveles: d.zonas, ejeId: ejeId || null, fmtEje: d.fmtG }},
+                        tooltip: {{ callbacks: {{ title: it => it.length ? _etqLargaMC(DATOS_MATCAMEL[idxs[it[0].dataIndex]]) : '', label: c => ' ' + d.fmtG(c.parsed.y) }} }},
+                        datalabels: dataLabelsCajita(v => d.fmtG(v), {{ borderColor: color + '55', color: '#1c2520', fuente: 12,
+                                                                        soloIdx: pos >= 0 ? pos : undefined, colorDestacado: color }})
+                    }},
+                    scales: {{
+                        y: {{ grace: '14%', grid: {{ color: '#f1f5f9' }}, border: {{ display: false }},
+                              ticks: {{ display: !!paraCopia, callback: v => d.fmtG(v), color: '#94a3b8', font: {{ size: 11 }} }} }},
+                        x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 0, autoSkip: false, color: '#64748b', font: {{ size: 11 }} }} }}
+                    }}
+                }},
+                plugins: [PLUGIN_ZONAS_MC]
+            }};
+        }}
+        function verHistoricoMC(clave, id) {{
+            MC_MODAL.clave = clave; MC_MODAL.id = id;
+            const d = _datosHistoricoMC(clave, id);
+            if (!d.fila) return;
+            const leyenda = d.zonas.length ? `<div class="mc-leyenda">${{d.zonas.map(z => `<span><i style="background:${{z.color}}"></i>${{z.nivel}} · ${{_textoRangoMC(z.desde, z.hasta, d.fmtG)}}</span>`).join('')}}</div>` : '';
+            _modalMC(d.fila.nombre, `${{clave === 'mat' ? 'MAT' : 'CAMEL'}} · histórico · mes seleccionado: ${{_etqLargaMC(d.r)}}`,
+                `<div class="mc-modal-herr" data-hg-slot="mc-modal-canvas"></div>${{leyenda}}
+                 <div class="mc-graf-wrap"><div class="mc-eje" id="mc-modal-eje" style="height:340px;"></div>
+                 <div class="mc-graf-scroll" id="mc-modal-scroll"><div class="mc-graf-inner" id="mc-modal-inner" style="height:340px;"><canvas id="mc-modal-canvas"></canvas></div></div></div>
+                 <p class="mc-nota">${{d.zonas.length ? 'Las franjas de fondo son los rangos vigentes en ' + _etqLargaMC(d.r) + ' (versión ' + d.r.version + ' de parametros.xlsx). ' : ''}}Desplázate con la barra inferior para recorrer el histórico.</p>`);
+            _pintarHistoricoModalMC();
+        }}
+        function _pintarHistoricoModalMC() {{
+            const d = _datosHistoricoMC(MC_MODAL.clave, MC_MODAL.id), st = MC_STATE[MC_MODAL.clave], n = DATOS_MATCAMEL.length;
+            const scroll = document.getElementById('mc-modal-scroll'), inner = document.getElementById('mc-modal-inner');
+            const anchoPunto = Math.max(70, (scroll.clientWidth || 900) / 12);   // se ve el último año
+            inner.style.width = Math.max(scroll.clientWidth, n * anchoPunto) + 'px';
+            if (MC_CHART_MODAL) MC_CHART_MODAL.destroy();
+            MC_CHART_MODAL = new Chart(document.getElementById('mc-modal-canvas'),
+                _configLineaMC(d, [...Array(n).keys()], st.idx, MC_MODAL.color, false, 'mc-modal-eje'));
+            const ir = () => {{ scroll.scrollLeft = Math.max(0, (st.idx + 1) * anchoPunto - scroll.clientWidth + anchoPunto / 2); }};
+            ir(); setTimeout(ir, 80);
+        }}
+        function copiarHistoricoModalMC() {{
+            const clave = MC_MODAL.clave, st = MC_STATE[clave], n = DATOS_MATCAMEL.length;
+            const d = _datosHistoricoMC(clave, MC_MODAL.id);
+            const visible = _visibleScrollMC(document.getElementById('mc-modal-scroll'), n);
+            abrirModalCopia({{ generar: async (rango) => {{
+                const idxs = _idxsRangoMC(rango, st.idx, visible);
+                const W = Math.max(760, idxs.length * 82), H = 340;
+                const temp = document.createElement('canvas'); temp.width = W; temp.height = H;
+                const chart = new Chart(temp, _configLineaMC(d, idxs, st.idx, MC_MODAL.color, true));
+                const titulo = `${{d.fila.nombre}} · ${{clave === 'mat' ? 'MAT' : 'CAMEL'}}`;
+                const subtitulo = _txtRangoMC(rango, idxs);
+                const L = _lienzoCopiaMC(titulo, subtitulo, d.zonas, W, H);
+                L.g.drawImage(chart.canvas, L.x, L.y, W, H);
+                chart.destroy();
+                const filas = idxs.map(i => [_etqLargaMC(DATOS_MATCAMEL[i]), d.fmtG(d.serie[i])]);
+                const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;border-bottom:1px solid #eee;';
+                const html = `<table style="border-collapse:collapse;"><tr><td colspan="2" style="${{base}}font-weight:bold;color:#B5452B;font-size:12pt;">${{titulo}}</td></tr>`
+                    + `<tr>${{['Mes', 'Valor'].map(h => `<td style="${{base}}background:#B5452B;color:#fff;font-weight:bold;">${{h}}</td>`).join('')}}</tr>`
+                    + filas.map(f => `<tr><td style="${{base}}">${{f[0]}}</td><td style="${{base}}text-align:right;">${{f[1]}}</td></tr>`).join('') + '</table>';
+                const texto = [titulo, 'Mes\\tValor', ...filas.map(f => f.join('\\t'))].join('\\n');
+                return {{ titulo, subtitulo, canvas: L.cv, html, texto, archivo: `${{d.fila.nombre.replace(/ /g, '_')}}_${{rango}}.png` }};
+            }} }});
+        }}
+
+        // ---------- Lupa: ventana con los rangos y el rango donde cae el valor ----------
+        function _lupaMC(accion) {{
+            return `<button class="mc-lupa" onclick="${{accion}}" title="Ver los rangos y por qué dio este resultado">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><line x1="16" y1="16" x2="20.5" y2="20.5"/></svg></button>`;
+        }}
+        function _modalMC(titulo, subtitulo, cuerpo) {{
+            let m = document.getElementById('mc-modal');
+            if (!m) {{
+                m = document.createElement('div');
+                m.id = 'mc-modal'; m.className = 'eeff-modal oculto';
+                m.innerHTML = `<div class="eeff-modal-caja mc-modal-caja" role="dialog" aria-modal="true">
+                    <div class="eeff-modal-cab">
+                        <div><div class="eeff-modal-titulo" id="mc-modal-titulo" style="color:#B5452B;"></div><div class="eeff-modal-sub" id="mc-modal-sub"></div></div>
+                        <button class="eeff-modal-cerrar" onclick="document.getElementById('mc-modal').classList.add('oculto')" aria-label="Cerrar">✕</button>
+                    </div>
+                    <div class="mc-modal-cuerpo" id="mc-modal-cuerpo"></div>
+                </div>`;
+                m.addEventListener('click', e => {{ if (e.target === m) m.classList.add('oculto'); }});
+                document.addEventListener('keydown', e => {{ if (e.key === 'Escape') m.classList.add('oculto'); }});
+                document.body.appendChild(m);
+            }}
+            document.getElementById('mc-modal-titulo').textContent = titulo;
+            document.getElementById('mc-modal-sub').textContent = subtitulo;
+            document.getElementById('mc-modal-cuerpo').innerHTML = cuerpo;
+            m.classList.remove('oculto');
+        }}
+        const _pct2 = v => (v * 100).toFixed(2).replace('.', ',') + '%';
+        const _num3 = v => v.toLocaleString('de-DE', {{ minimumFractionDigits: 3, maximumFractionDigits: 3 }});
+
+        function verRangosCAMEL(variable) {{
+            const r = DATOS_MATCAMEL[MC_STATE.camel.idx], c = r.camel;
+            const x = c.indicadores.find(i => i.variable === variable);
+            if (!x) return;
+            const v = r.variables[variable] || {{}};
+            const esMult = /m[ií]nimo/i.test(x.unidad || '');
+            const lim = l => esMult ? `${{_num3(l)}} × ${{_pct2(c.minimo_legal)}} = ${{_pct2(l * c.minimo_legal)}}` : _fmtVarMC(l, v.formato);
+            const textoRango = rg => _textoRangoMC(rg.desde, rg.hasta, lim);
+            const chipP = pt => {{ const n = _nivelDe(c.niveles, pt); return `<span class="mc-chip" style="background:${{n ? n.color : '#94a3b8'}};">${{pt}}</span>`; }};
+            const valorTxt = _fmtVarMC(x.valor, v.formato);
+            const comparadoTxt = esMult && x.comparado !== null ? ` = ${{_num3(x.comparado)}} veces el mínimo legal (${{_pct2(c.minimo_legal)}})` : '';
+            const activo = x.rangos.find(rg => rg.puntaje === x.puntaje);
+            let h = `<div class="mc-explica">
+                <div><span>Valor del mes</span><b>${{valorTxt}}</b><small>${{comparadoTxt || 'Fórmula: ' + (v.formula || '')}}</small></div>
+                <div><span>Puntaje obtenido</span>${{x.puntaje === null ? '—' : chipP(x.puntaje)}}<small>${{activo ? textoRango(activo) : 'Sin rango aplicable'}}</small></div>
+            </div>`;
+            h += `<table class="solv-resumen-tabla mc-rangos"><thead><tr><th>Puntaje</th><th>Rango</th><th>Regla original</th><th></th></tr></thead><tbody>`;
+            x.rangos.forEach(rg => {{
+                const es = rg.puntaje === x.puntaje;
+                h += `<tr class="${{es ? 'mc-rango-activo' : ''}}"><td>${{chipP(rg.puntaje)}}</td><td>${{textoRango(rg)}}</td>
+                      <td style="color:#64748b;">${{rg.regla}}</td><td class="num">${{es ? '◀ Aquí está el valor del mes' : ''}}</td></tr>`;
+            }});
+            h += `</tbody></table><p class="mc-nota">Cada rango incluye su límite inferior (≥) y excluye el superior (&lt;). Rangos de la versión ${{r.version}} de parametros.xlsx (vigente desde ${{r.version_desde}}).</p>`;
+            _modalMC(x.nombre, `${{_etqLargaMC(r)}} · ${{x.componente || ''}}`, h);
+        }}
+
+        function verNivelesMC(tipo) {{
+            const esMat = tipo === 'mat';
+            const r = DATOS_MATCAMEL[esMat ? MC_STATE.mat.idx : MC_STATE.camel.idx];
+            const c = r.camel;
+            const niveles = esMat ? r.mat.niveles : c.niveles;
+            const valor = esMat ? r.mat.escala : (tipo === 'costo' ? c.costo_agencia : c.promedio);
+            const titulo = esMat ? 'MAT · Probabilidad de quiebra' : (tipo === 'costo' ? 'Costo de agencia' : 'Calificación CAMEL');
+            const n = _nivelDe(niveles, valor);
+            const lim = l => _fmt2(l);
+            const textoNivel = nv => _textoRangoMC(nv.desde, nv.hasta, lim);
+            const chipP = pt => {{ const k = _nivelDe(c.niveles, pt); return `<span class="mc-chip" style="background:${{k ? k.color : '#94a3b8'}};">${{Number.isInteger(pt) ? pt : _fmt2(pt)}}</span>`; }};
+            let h = `<div class="mc-explica">
+                <div><span>Valor del mes</span><b>${{_fmt2(valor)}}</b><small>${{esMat ? 'Escala 0-100 · más alto, peor' : 'Escala 1-5 · más alto, peor'}}</small></div>
+                <div><span>Nivel</span><span class="mc-nivel" style="background:${{n ? n.color : '#64748b'}};">${{n ? n.nivel : '—'}}</span><small>${{n ? textoNivel(n) : ''}}</small></div>
+            </div>`;
+            // Cómo se obtuvo el valor
+            if (tipo === 'costo' || tipo === 'promedio') {{
+                const partes = tipo === 'costo'
+                    ? c.indicadores.filter(i => i.grupo.toLowerCase().startsWith('costo')).map(i => [i.nombre, i.puntaje])
+                    : c.indicadores.filter(i => !i.grupo.toLowerCase().startsWith('costo')).map(i => [i.nombre, i.puntaje]).concat([['Costo de agencia (promedio)', c.costo_agencia]]);
+                h += `<table class="solv-resumen-tabla mc-rangos"><thead><tr><th>Se promedian</th><th class="num">Puntaje</th></tr></thead><tbody>`;
+                partes.forEach(([nom, pt]) => h += `<tr><td>${{nom}}</td><td class="num">${{pt === null ? '—' : chipP(pt)}}</td></tr>`);
+                h += `<tr class="solv-total"><td>Promedio</td><td class="num">${{chipP(valor)}}</td></tr></tbody></table>`;
+            }}
+            h += `<table class="solv-resumen-tabla mc-rangos"><thead><tr><th>Nivel</th><th>Rango</th><th></th></tr></thead><tbody>`;
+            niveles.forEach(nv => {{
+                const es = n && nv.nivel === n.nivel;
+                h += `<tr class="${{es ? 'mc-rango-activo' : ''}}"><td><span class="mc-nivel" style="background:${{nv.color}};">${{nv.nivel}}</span></td>
+                      <td>${{textoNivel(nv)}}</td><td class="num">${{es ? '◀ Aquí está el valor del mes' : ''}}</td></tr>`;
+            }});
+            h += `</tbody></table><p class="mc-nota">Niveles de la hoja ${{esMat ? 'MAT_Niveles' : 'CAMEL_Niveles'}} · versión ${{r.version}} de parametros.xlsx (vigente desde ${{r.version_desde}}).</p>`;
+            _modalMC(titulo, _etqLargaMC(r), h);
+        }}
+
+        // Copiar las tablas de MAT / CAMEL (imagen o Excel) con el modal genérico
+        async function copiarTablaMC(clave) {{
+            if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            const titulo = clave === 'mat' ? 'MAT · Modelo de Alerta Temprana' : 'CAMEL · Calificación por indicador';
+            const subtitulo = document.getElementById(clave + '-tabla-sub').textContent;
+            const bloques = [{{ titulo: clave === 'mat' ? 'Variables del modelo' : 'Calificación por indicador', datos: _leerTablaDOM(document.getElementById(clave + '-tabla')) }}];
+            const canvas = _dibujarBloquesTabla(titulo, subtitulo, bloques, '#B5452B');
+            const {{ html, texto }} = _htmlExcelBloques(titulo, subtitulo, bloques, '#B5452B');
+            abrirModalCopia({{ titulo, subtitulo, canvas, html, texto, archivo: (clave === 'mat' ? 'MAT_' : 'CAMEL_') + subtitulo.split(' · ')[0].replace(/ /g, '_') + '.png' }});
+        }}
+
         // ===== Resumen compacto para el análisis de solvencia =====
         function renderResumenSolvencia(idx) {{
             const r = DATOS[idx], p = idx > 0 ? DATOS[idx - 1] : null;
@@ -12691,7 +15576,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             return {{ html: html + '</table>', texto: lineas.join('\\n') }};
         }}
         // Modal genérico de copia (reutiliza el estilo del modal de comparativos)
-        const COPIA_MODAL = {{ canvas: null, html: '', texto: '', archivo: 'cuadro.png' }};
+        const COPIA_MODAL = {{ canvas: null, html: '', texto: '', archivo: 'cuadro.png', generar: null }};
+        // Rangos de copiado para gráficos y tablas con histórico
+        const RANGOS_COPIA = [['visible', 'Solo lo que se ve'], ['6', 'Últimos 6 meses'], ['13', 'Últimos 13 meses'], ['todo', 'Todo']];
         function abrirModalCopia(cfg) {{
             let m = document.getElementById('copia-modal');
             if (!m) {{
@@ -12702,6 +15589,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <div><div class="eeff-modal-titulo" id="copia-modal-titulo"></div><div class="eeff-modal-sub" id="copia-modal-sub"></div></div>
                         <button class="eeff-modal-cerrar" onclick="document.getElementById('copia-modal').classList.add('oculto')" aria-label="Cerrar">✕</button>
                     </div>
+                    <div class="eeff-modal-tabs oculto" id="copia-modal-tabs"></div>
                     <div class="eeff-modal-vista"><img id="copia-modal-img" alt="Vista previa del cuadro"></div>
                     <div class="eeff-modal-pie">
                         <span class="eeff-modal-estado" id="copia-modal-estado"></span>
@@ -12714,6 +15602,18 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 document.addEventListener('keydown', e => {{ if (e.key === 'Escape') m.classList.add('oculto'); }});
                 document.body.appendChild(m);
             }}
+            COPIA_MODAL.generar = cfg.generar || null;
+            const tabs = document.getElementById('copia-modal-tabs');
+            m.classList.remove('oculto');
+            if (cfg.generar) {{
+                tabs.innerHTML = RANGOS_COPIA.filter(r => !cfg.rangos || cfg.rangos.includes(r[0])).map(([k, t]) => `<button data-rango="${{k}}" onclick="_rangoModalCopia('${{k}}')">${{t}}</button>`).join('');
+                tabs.classList.remove('oculto');
+                return _rangoModalCopia(cfg.rangoInicial || 'visible');
+            }}
+            tabs.classList.add('oculto');
+            _mostrarCopia(cfg);
+        }}
+        function _mostrarCopia(cfg) {{
             Object.assign(COPIA_MODAL, cfg);
             document.getElementById('copia-modal-titulo').textContent = cfg.titulo;
             document.getElementById('copia-modal-sub').textContent = cfg.subtitulo;
@@ -12721,8 +15621,32 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const img = document.getElementById('copia-modal-img');
             img.src = cfg.canvas.toDataURL('image/png');
             img.style.width = (cfg.canvas.width / 2) + 'px';
-            m.classList.remove('oculto');
         }}
+        async function _rangoModalCopia(rango) {{
+            document.querySelectorAll('#copia-modal-tabs button').forEach(b => b.classList.toggle('activo', b.dataset.rango === rango));
+            if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            _mostrarCopia(await COPIA_MODAL.generar(rango));
+        }}
+        // Índices de períodos según el rango elegido (hasta el período seleccionado)
+        function _idxsRangoMC(rango, idxActual, visible) {{
+            const lista = (a, b) => {{ const r = []; for (let k = a; k <= b; k++) r.push(k); return r; }};
+            if (rango === 'visible' && visible) return lista(visible[0], visible[1]);
+            if (rango === 'todo') return lista(0, DATOS_MATCAMEL.length - 1);
+            const cuantos = rango === '6' ? 6 : 13;
+            return lista(Math.max(0, idxActual - cuantos + 1), idxActual);
+        }}
+        // Períodos visibles en un contenedor con desplazamiento horizontal
+        function _visibleScrollMC(scroll, n, anchoFija) {{
+            anchoFija = anchoFija || 0;
+            const w = (scroll.scrollWidth - anchoFija) / n;
+            const i0 = Math.max(0, Math.floor(scroll.scrollLeft / w));
+            const i1 = Math.min(n - 1, Math.ceil((scroll.scrollLeft + scroll.clientWidth - anchoFija) / w) - 1);
+            return [i0, Math.max(i0, i1)];
+        }}
+        const _txtRangoMC = (rango, idxs) => {{
+            const nombre = (RANGOS_COPIA.find(r => r[0] === rango) || [, ''])[1];
+            return `${{nombre}} · ${{_etqLargaMC(DATOS_MATCAMEL[idxs[0]])}} a ${{_etqLargaMC(DATOS_MATCAMEL[idxs[idxs.length - 1]])}}`;
+        }};
         async function _accionModalCopia(accion) {{
             const estado = document.getElementById('copia-modal-estado');
             const blobPromesa = new Promise(res => COPIA_MODAL.canvas.toBlob(res, 'image/png'));
@@ -15168,9 +18092,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             'evolucion-icg-root', 'rentabilidad-root', 'depositos-root',
             'quebranto-root', 'capital-inst-root', 'capital-fogacoop-root', 'suficiencia-root',
             'margen-total-root', 'margen-resistencia-root',
-            'cartera-activo-root', 'depositos-pasivo-root', 'depositos-cartera-root',
+            'cartera-activo-root', 'cartera-provision-root', 'depositos-pasivo-root', 'depositos-cartera-root',
             'rent-roe-root', 'rent-mn-root', 'rent-roic-root', 'rent-roa-root',
-            'esf-root', 'eri-root'
+            'esf-root', 'eri-root', 'mat-root', 'camel-root'
         ];
         function ocultarTodosLosModulos() {{
             TODOS_LOS_MODULOS.forEach(id => {{
@@ -15355,12 +18279,14 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         }}
 
         // ---- Gráfico de línea con área degradada (mismo estilo Solvencia) ----
-        function _crearGraficoRatio(canvasId, axisId, serie, etiquetas, etiquetasLargas, color, idxActual) {{
+        function _crearGraficoRatio(canvasId, axisId, serie, etiquetas, etiquetasLargas, color, idxActual, opts) {{
             const ctx = document.getElementById(canvasId);
             if (!ctx) return null;
+            opts = opts || {{}};
+            const fmtValor = opts.fmt || fmtPctDirecto;
             const maxSerie = Math.max(...serie.filter(v => v !== null && !isNaN(v)), 0);
             const ejeInfo = sincronizarEjeYHistorico(serie, axisId, {{
-                tituloEje: '%', formatter: (v) => v.toFixed(2).replace('.', ',') + '%'
+                tituloEje: opts.tituloEje || '%', formatter: opts.fmtEje || ((v) => v.toFixed(2).replace('.', ',') + '%')
             }});
             const niceMin = ejeInfo.niceMin, niceMax = ejeInfo.niceMax;
             return new Chart(ctx, {{
@@ -15393,11 +18319,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             titleColor: '#fff', bodyColor: '#fff',
                             callbacks: {{
                                 title: (items) => items && items[0] ? etiquetasLargas[items[0].dataIndex] : '',
-                                label: (c) => '  ' + fmtPctDirecto(c.parsed.y)
+                                label: (c) => '  ' + fmtValor(c.parsed.y)
                             }}
                         }},
                         datalabels: dataLabelsCajita(
-                            (v) => v !== null ? fmtPctDirecto(v) : '',
+                            (v) => v !== null ? fmtValor(v) : '',
                             {{ borderColor: color + '55', color: '#1c2520', soloIdx: idxActual, colorDestacado: color }}
                         )
                     }},
@@ -19862,7 +22788,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                 backgroundColor: ctx => ctx.dataIndex === iAct ? (negativo(datos[ctx.dataIndex]) ? '#C91A15' : d.color) : null,
                                 borderRadius: 5,
                                 padding: ctx => ctx.dataIndex === iAct ? {{ top: 3, bottom: 3, left: 6, right: 6 }} : 0,
-                                font: ctx => ({{ size: 10, weight: ctx.dataIndex === iAct || esDic(ctx.dataIndex) ? '700' : '500' }})
+                                font: ctx => ({{ size: 11, weight: ctx.dataIndex === iAct || esDic(ctx.dataIndex) ? '700' : '500' }})
                             }}
                         }},
                         scales: {{
@@ -19969,7 +22895,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             offset: 3, clamp: true, clip: false,
                             formatter: (v) => fmtEtiquetaICG(Math.abs(v)),
                             color: (ctx) => ctx.datasetIndex === 0 ? '#11782C' : '#ffffff',
-                            font: (ctx) => ({{ size: 10, weight: ctx.dataIndex === ICG_STATE.idxActual ? '800' : '600' }})
+                            font: (ctx) => ({{ size: 11, weight: ctx.dataIndex === ICG_STATE.idxActual ? '800' : '600' }})
                         }}
                     }},
                     scales: {{
@@ -20059,7 +22985,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             backgroundColor: (ctx) => ctx.dataIndex !== ICG_STATE.idxActual ? null : ((ctx.dataset.data[ctx.dataIndex] >= 0) ? '#11782C' : '#A0100B'),
                             borderRadius: 6,
                             color: (ctx) => ctx.dataIndex === ICG_STATE.idxActual ? '#ffffff' : ((ctx.dataset.data[ctx.dataIndex] >= 0) ? '#11782C' : '#A0100B'),
-                            font: (ctx) => ({{ size: ctx.dataIndex === ICG_STATE.idxActual ? 11 : 10, weight: ctx.dataIndex === ICG_STATE.idxActual ? '700' : '600' }}),
+                            font: (ctx) => ({{ size: ctx.dataIndex === ICG_STATE.idxActual ? 12 : 11, weight: ctx.dataIndex === ICG_STATE.idxActual ? '700' : '600' }}),
                             padding: (ctx) => ctx.dataIndex === ICG_STATE.idxActual ? {{ top: 4, bottom: 4, left: 8, right: 8 }} : 0,
                             formatter: (v) => v !== null ? fmtEtiquetaICG(v) : ''
                         }}
@@ -20247,7 +23173,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                 return v >= 6 && _altoPxBarra(ctx.chart, v) >= 16 ? 'auto' : false;
                             }},
                             color: (ctx) => PAL[ctx.dataset.label].texto,
-                            font: (ctx) => ({{ size: 11, weight: ctx.dataIndex === ICG_STATE.idxActual ? '800' : '700' }}),
+                            font: (ctx) => ({{ size: 12, weight: ctx.dataIndex === ICG_STATE.idxActual ? '800' : '700' }}),
                             formatter: (v) => v ? v.toFixed(2).replace('.', ',') + '%' : ''
                         }}
                     }},
@@ -22049,7 +24975,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             clamp: true, clip: false,
                             formatter: (v) => fmtFull(v),
                             color: (c) => c.dataIndex === (config.idxActual ?? IDX_DEFAULT) ? '#0f172a' : '#475569',
-                            font: (c) => ({{ family: "'JetBrains Mono', monospace", size: 9.5,
+                            font: (c) => ({{ family: "'JetBrains Mono', monospace", size: 11,
                                              weight: c.dataIndex === (config.idxActual ?? IDX_DEFAULT) ? '800' : '600' }})
                         }}
                     }},
@@ -24996,6 +27922,9 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 {{ nombre: 'ROA · Rent. Activo', modulo: 'Excedente / Activo', serie: SERIE_ROA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#A75A00', click: 'abrirRendRoa' }},
                 {{ nombre: 'ROIC · Rent. Capital Inv.', modulo: 'Excedente / Capital invertido', serie: SERIE_ROIC, fmt: fmtPct, unidad: 'pts', modo: 'bueno_alto', invertir: false, varDesdeFebrero: true, punto: '#9B86C0', click: 'abrirRendRoic' }},
                 {{ nombre: 'Eficiencia', modulo: 'Gastos / Ingresos', serie: SERIE_EFICIENCIA, fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, varDesdeFebrero: true, punto: '#CC6A02', click: 'abrirEvolucionICG' }},
+                {{ seccion: 'Alertas tempranas' }},
+                {{ nombre: 'MAT · Prob. de quiebra', modulo: 'Escala 0-100 · más alto, peor', serie: DATOS_MATCAMEL.map(r => r.mat.escala), fmt: fmtPct, unidad: 'pts', modo: 'bueno_bajo', invertir: true, punto: '#C2562F', click: 'abrirMAT' }},
+                {{ nombre: 'CAMEL · Calificación', modulo: 'Escala 1-5 · más alto, peor', serie: DATOS_MATCAMEL.map(r => r.camel.promedio), fmt: (v) => (v === null || v === undefined) ? '—' : v.toFixed(2).replace('.', ','), unidad: 'pts', modo: 'bueno_bajo', invertir: true, punto: '#E07A2E', click: 'abrirCAMEL' }},
             ];
             
             const FILAS_MONEY = [
@@ -25658,6 +28587,19 @@ def main():
             "segmentos": segmentos,
         })
     
+    # Modelos MAT y CAMEL con parámetros versionados (parametros.xlsx junto a BALANCES.xlsx)
+    ruta_parametros = carpeta_salida / NOMBRE_PARAMETROS
+    if not ruta_parametros.exists():
+        crear_parametros_excel(ruta_parametros)
+        print(f"\nSe creó {ruta_parametros.name} con la versión 1 de los parámetros MAT y CAMEL")
+    print(f"\nCalculando MAT y CAMEL con {ruta_parametros.name}...")
+    cartera_provision = calcular_cartera_provision(df, periodos, todos_morosidad)
+    params_mc = leer_parametros_modelos(ruta_parametros)
+    mat_camel = calcular_mat_camel(df, periodos, todos_resultados, todos_riesgo, params_mc)
+    params_mc_json = {h: [{k: (v if v is None or isinstance(v, (int, float, str)) else str(v)) for k, v in fila.items()}
+                          for fila in filas] for h, filas in params_mc.items()}
+    print(f"   OK: versiones aplicadas {sorted({r['version'] for r in mat_camel})}")
+
     print("\nCalculando Estados Financieros mensuales (E.S.F. y E.R.I.)...")
     estados_financieros = calcular_estados_financieros(df, periodos)
     print(f"   OK: {len(estados_financieros['periodos'])} periodos")
@@ -25701,7 +28643,8 @@ def main():
                  series_indicadores=series_indicadores,
                  cartera_segmentos=cartera_segmentos,
                  catalogo_cuentas=catalogo_cuentas,
-                 estados_financieros=estados_financieros)
+                 estados_financieros=estados_financieros,
+                 mat_camel=mat_camel, parametros_mc=params_mc_json, cartera_provision=cartera_provision)
     print(f"   OK: {ruta_html.name}")
     
     if ABRIR_HTML_AL_TERMINAR:
