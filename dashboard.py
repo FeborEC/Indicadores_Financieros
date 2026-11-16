@@ -2784,6 +2784,12 @@ PARAMETROS_POR_DEFECTO = {
         "anchos": [10, 28, 12, 70],
         "filas": [[1, "MINIMO_LEGAL_SOLVENCIA", 0.09, "Relación de solvencia mínima legal (rangos 'x mínimo legal')"]],
     },
+    "EBITDA_Niveles": {
+        "columnas": ["Version", "Quintil", "Nivel", "Color"],
+        "anchos": [10, 10, 16, 12],
+        "filas": [[1, 1, "Muy bajo", "#C91A15"], [1, 2, "Bajo", "#F08A24"], [1, 3, "Medio", "#E3B23C"],
+                  [1, 4, "Alto", "#8BC34A"], [1, 5, "Muy alto", "#17A53D"]],
+    },
     "CAMEL_Niveles": {
         "columnas": ["Version", "Desde (1-5)", "Hasta (1-5)", "Nivel (índice único)", "Color"],
         "anchos": [10, 14, 14, 22, 12],
@@ -2843,6 +2849,26 @@ def leer_parametros_modelos(ruta) -> dict:
     """Lee parametros.xlsx → {hoja: [dict por fila]} (claves = encabezados)."""
     import openpyxl
     wb = openpyxl.load_workbook(ruta, data_only=True)
+    faltan = [h for h in PARAMETROS_POR_DEFECTO if h not in wb.sheetnames]
+    if faltan:   # hojas nuevas del modelo: se agregan con sus valores por defecto sin tocar las demás
+        from openpyxl.styles import Font, PatternFill, Alignment
+        wb_e = openpyxl.load_workbook(ruta)
+        for hoja in faltan:
+            d = PARAMETROS_POR_DEFECTO[hoja]
+            w = wb_e.create_sheet(hoja)
+            w.append(d["columnas"])
+            for c in w[1]:
+                c.font = Font(bold=True, color="FFFFFF")
+                c.fill = PatternFill("solid", fgColor="11782C")
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            for fila in d["filas"]:
+                w.append([None if v == "" else v for v in fila])
+            for j, ancho in enumerate(d["anchos"], 1):
+                w.column_dimensions[openpyxl.utils.get_column_letter(j)].width = ancho
+            w.freeze_panes = "A2"
+            print(f"   Se agregó la hoja '{hoja}' a {ruta}")
+        wb_e.save(ruta)
+        wb = openpyxl.load_workbook(ruta, data_only=True)
     datos = {}
     for hoja in PARAMETROS_POR_DEFECTO:
         if hoja not in wb.sheetnames:
@@ -2933,6 +2959,96 @@ def calcular_cartera_provision(df, periodos, todos_morosidad):
         codigos |= set(CUENTAS_PROVISION_GENERAL)
         salida[0]["nombres"] = {c: _nombre_cuenta_legible(nombres[c]) if c in nombres.index else "" for c in sorted(codigos)}
     return salida
+
+
+# ==============================================================================
+# EBITDA (hoja «EBITDA» del Excel de estados financieros)
+# ==============================================================================
+EBITDA_CUENTAS = [
+    ("ingresos", "41", "Ingresos operacionales"),
+    ("costo", "6", "Costo de ventas"),
+    ("gastos", "51", "Gastos de administración"),
+    ("provisiones", "5115", "Provisiones"),
+    ("amortizaciones", "5120", "Amortizaciones"),
+    ("depreciaciones", "5125", "Depreciaciones"),
+]
+
+
+def calcular_ebitda(df: pd.DataFrame, periodos: list, params: dict) -> list:
+    """EBITDA acumulado del año (hoja «EBITDA» del Excel de estados financieros), en pesos.
+    EBIT = 41 − 6 − 51 · EBITDA = EBIT + 5115 + 5120 + 5125 · Margen = EBITDA ÷ 41.
+    Niveles: quintiles del histórico del margen EBITDA (nombres y colores en la hoja EBITDA_Niveles)."""
+    saldos = df.groupby(["AÑO", "MES", "CUENTA"])["NUEVO SALDO"].sum().to_dict()
+    salida = []
+    for anio, mes in periodos:
+        mes = mes.upper()
+        v = {k: float(saldos.get((anio, mes, c), 0.0)) for k, c, _ in EBITDA_CUENTAS}
+        salida.append({"anio": anio, "mes": mes, **v})
+    # Niveles por quintiles del propio histórico del margen EBITDA (en %): cada mes se ubica frente a su historia
+    for r in salida:
+        ebit = r["ingresos"] - r["costo"] - r["gastos"]
+        r["ebit"] = ebit
+        r["ebitda"] = ebit + r["provisiones"] + r["amortizaciones"] + r["depreciaciones"]
+        r["sin_prov"] = ebit + r["amortizaciones"] + r["depreciaciones"]
+        r["margen"] = r["ebitda"] / r["ingresos"] if r["ingresos"] else None
+        r["margen_sin_prov"] = r["sin_prov"] / r["ingresos"] if r["ingresos"] else None
+    hist = sorted(r["margen"] * 100 for r in salida if r["margen"] is not None)
+    import numpy as np
+    cortes = [float(np.percentile(hist, q)) for q in (20, 40, 60, 80)] if hist else [0, 0, 0, 0]
+    escala = {"min": math.floor(min(hist)) - 1 if hist else -10, "max": math.ceil(max(hist)) + 1 if hist else 30,
+              "cortes": cortes, "n": len(hist)}
+    for r in salida:
+        version = _version_vigente(params, r["anio"], r["mes"])
+        nombres = sorted(_filas_version(params, "EBITDA_Niveles", version), key=lambda x: _num(x["Quintil"]) or 0)
+        limites = [None] + cortes + [None]
+        niveles = [{"desde": limites[k], "hasta": limites[k + 1], "nivel": n["Nivel"], "color": n.get("Color") or "#64748b",
+                    "quintil": int(_num(n["Quintil"]))} for k, n in enumerate(nombres[:5])]
+        m = None if r["margen"] is None else r["margen"] * 100
+        actual = next((n for n in niveles if m is not None and (n["desde"] is None or m >= n["desde"])
+                       and (n["hasta"] is None or m < n["hasta"])), None)
+        r.update({"version": version, "niveles": niveles, "escala": escala,
+                  "nivel": actual["nivel"] if actual else None, "color": actual["color"] if actual else "#64748b"})
+    return salida
+
+
+def actualizar_quintiles_ebitda(ruta, ebitda: list) -> None:
+    """Escribe en la hoja EBITDA_Niveles los límites de los quintiles recalculados con todo el histórico."""
+    import openpyxl
+    from datetime import datetime
+    if not ebitda:
+        return
+    niveles, escala, ult = ebitda[-1]["niveles"], ebitda[-1]["escala"], ebitda[-1]
+    try:
+        wb = openpyxl.load_workbook(ruta)
+        if "EBITDA_Niveles" not in wb.sheetnames:
+            return
+        ws = wb["EBITDA_Niveles"]
+        enc = [str(c.value).strip() if c.value is not None else "" for c in ws[1]]
+        extra = ["Desde (%) calculado", "Hasta (%) calculado", "Calculado con"]
+        cols = {}
+        for nombre in extra:
+            if nombre not in enc:
+                enc.append(nombre)
+                ws.cell(row=1, column=len(enc), value=nombre).font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                ws.cell(row=1, column=len(enc)).fill = openpyxl.styles.PatternFill("solid", fgColor="11782C")
+                ws.column_dimensions[openpyxl.utils.get_column_letter(len(enc))].width = 22 if nombre != "Calculado con" else 46
+            cols[nombre] = enc.index(nombre) + 1
+        c_q = enc.index("Quintil") + 1
+        por_quintil = {n["quintil"]: n for n in niveles}
+        nota = (f"{escala['n']} meses hasta {ult['mes'].capitalize()} {ult['anio']} · "
+                f"actualizado {datetime.now():%Y-%m-%d %H:%M}")
+        for fila in range(2, ws.max_row + 1):
+            q = ws.cell(row=fila, column=c_q).value
+            n = por_quintil.get(int(q)) if q not in (None, "") else None
+            if not n:
+                continue
+            ws.cell(row=fila, column=cols["Desde (%) calculado"], value=None if n["desde"] is None else round(n["desde"], 4))
+            ws.cell(row=fila, column=cols["Hasta (%) calculado"], value=None if n["hasta"] is None else round(n["hasta"], 4))
+            ws.cell(row=fila, column=cols["Calculado con"], value=nota)
+        wb.save(ruta)
+        print(f"   Quintiles del margen EBITDA actualizados en {ruta.name if hasattr(ruta, 'name') else ruta}")
+    except PermissionError:
+        print("   AVISO: parametros.xlsx está abierto; no se pudieron guardar los quintiles del EBITDA (ciérralo y vuelve a correr).")
 
 
 def calcular_mat_camel(df: pd.DataFrame, periodos: list, todos_resultados: list,
@@ -3229,6 +3345,9 @@ MENUS_LATERALES = [
         ("Márgenes", "margen-resistencia-root", "abrirMargenResistencia", "Margen de Resistencia",
          "Rendimiento vs. costos de la cartera", "#5A8B6E",
          '<path d="M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6z"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'),
+        ("Márgenes", "ebitda-root", "abrirEBITDA", "EBITDA",
+         "Utilidad operativa antes de provisiones y depreciaciones", "#0E6B2A",
+         '<path d="M3 3v18h18"/><rect x="6" y="12" width="3" height="6"/><rect x="11" y="8" width="3" height="10"/><path d="M16 6l3 3-3 3"/>'),
         ("Rentabilidad", "rent-roe-root", "abrirRendRoe", "ROE",
          "Sobre recursos propios", "#2E8B6E", _ICONO_LINEA),
         ("Rentabilidad", "rent-roa-root", "abrirRendRoa", "ROA",
@@ -3320,7 +3439,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                  cartera_segmentos: list = None,
                  catalogo_cuentas: dict = None,
                  estados_financieros: dict = None,
-                 mat_camel: list = None, parametros_mc: dict = None, cartera_provision: list = None) -> str:
+                 mat_camel: list = None, parametros_mc: dict = None, cartera_provision: list = None, ebitda: list = None) -> str:
     """Genera el archivo HTML del dashboard interactivo."""
     datos_json = [_resultado_a_json(r) for r in todos_resultados]
     
@@ -5800,6 +5919,24 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .cp-comp-ley {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: #64748b; border-top: 1px solid #eef2f6; padding-top: 10px; }}
             @media (max-width: 1100px) {{ .cp-dos {{ grid-template-columns: 1fr; }} }}
             @media (max-width: 760px) {{ .cp-kpis {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+            /* ===== EBITDA ===== */
+            .eb-cascada-wrap {{ position: relative; height: 215px; }}
+            .eb-tramo-tit {{ font-size: 12px; font-weight: 700; color: #11782C; margin: 6px 0 2px; }}
+            #ebitda-root .mc-graf-inner {{ height: 300px; }}
+            #ebitda-root .mc-eje {{ height: 300px; }}
+            .eb-tabla td.eb-cta {{ color: #94a3b8; font-size: 11px; text-align: center; }}
+            .eb-tabla tr.eb-fila-total td {{ background: #ecf7ef; font-weight: 800; color: #0f5132; }}
+            .eb-tabla tr.eb-fila-total td.mc-tab-fija {{ background: #ecf7ef; }}
+            .eb-tabla tr.eb-fila-pct td {{ font-weight: 800; color: #11782C; }}
+            .eb-tabla tr.eb-fila-alt td {{ color: #4D61B4; font-style: italic; }}
+            .eb-tabla td.mc-tab-actual {{ color: #0f172a; background: #eef7f0; font-weight: 800; }}
+            .eb-tabla th.mc-tab-actual {{ color: #11782C; background: #eef7f0; }}
+            .eb-tabla tr.eb-fila-pct td.mc-tab-actual {{ color: #11782C; }}
+            .eb-tabla tr.eb-fila-alt td.mc-tab-actual {{ color: #4D61B4; }}
+            .eb-tabla td.eb-neg {{ color: #C91A15 !important; }}
+            .eb-detalle {{ width: 100%; }}
+            .eb-detalle td, .eb-detalle th {{ padding: 7px 12px; }}
+            .eb-signo {{ display: inline-block; width: 14px; color: #64748b; }}
             /* ===== Barra común de gráficos: Copiar imagen y Colores ===== */
             .gbar {{ display: flex; justify-content: flex-end; gap: 8px; margin: -2px 0 8px; position: relative; z-index: 6; }}
             .gbar.gbar-flota {{ position: absolute; top: 18px; right: 20px; margin: 0; }}
@@ -5839,6 +5976,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .mc-tablero .mc-tab-actual {{ background: #fff4ec !important; font-weight: 800; color: #B5452B; }}
             .mc-tablero .mc-tab-anio {{ border-left: 1px dashed #e2c7b8; }}
             .mc-tablero .mc-lupa {{ margin: 0 6px 0 0; }}
+            .mc-kpi-lbl .mc-lupa {{ margin: 0 10px 0 0; vertical-align: -6px; }}
             .mc-punto {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }}
             .mc-modal-cuerpo {{ padding: 6px 22px 20px; overflow: auto; }}
             .mc-explica {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0 16px; }}
@@ -9862,6 +10000,17 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                 </div>
+
+                <!-- EBITDA -->
+                <div class="modulo-card modulo-evolucion-icg" onclick="abrirEBITDA()">
+                    <span class="modulo-badge activo">Disponible</span>
+                    <div class="modulo-icono">
+                        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="6" y="12" width="3" height="6"/><rect x="11" y="8" width="3" height="10"/><path d="M16 6l3 3-3 3"/></svg>
+                    </div>
+                    <h3 class="modulo-titulo">EBITDA</h3>
+                    <p class="modulo-descripcion">EBIT, EBITDA y margen EBITDA acumulados del año, con velocímetro, cascada del cálculo e histórico.</p>
+                    <span class="modulo-accion">Abrir módulo <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span>
+                </div>
                 
                 <div class="modulo-card modulo-evolucion-icg" onclick="abrirRendRoe()">
                     <span class="modulo-badge activo">Disponible</span>
@@ -11364,6 +11513,66 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             </header>
             <div class="evolucion-kpis-grid" id="eri-kpis"></div>
             <div id="eri-secciones"></div>
+        </div>
+
+        <!-- ========== MÓDULO: EBITDA ========== -->
+        <div class="container oculto" id="ebitda-root">
+            <header class="header">
+                <div class="header-titulo">
+                    <button class="btn-volver-evolucion" onclick="volverAlSubmenuIngresosDesdeEBITDA()">
+                        <svg viewBox="0 0 24 24" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+                        <span>Volver al módulo Rentabilidad</span>
+                    </button>
+                    <h1 class="header-title-text" style="color:#11782C;">EBITDA</h1>
+                    <div class="subtitle">Utilidad operativa antes de provisiones, amortizaciones y depreciaciones · acumulado del año</div>
+                </div>
+                <div class="header-acciones">
+                    <div class="filtros">
+                        <div class="filtro-card"><label for="eb-filtro-anio">Año</label><select id="eb-filtro-anio"></select></div>
+                        <div class="filtro-card"><label for="eb-filtro-mes">Mes</label><select id="eb-filtro-mes"></select></div>
+                    </div>
+                    <button class="btn-excel" onclick="_xBoton(this, descargarExcelEBITDA)" title="Descargar el cálculo del EBITDA de todos los meses en Excel">
+                        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                        <span>Descargar Excel</span>
+                    </button>
+                </div>
+            </header>
+            <div class="mc-top">
+                <div class="mc-instrumento">
+                    <button class="eeff-btn-copiar mc-copiar-inst" onclick="copiarInstrumentoMC('eb')" title="Copiar el velocímetro"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copiar</span></button>
+                    <svg id="eb-gauge" viewBox="0 0 320 285" role="img" aria-label="Velocímetro del margen EBITDA"></svg>
+                    <div class="mc-kpi-filas" id="eb-kpis"></div>
+                </div>
+                <div class="section acc-graficos mc-blanco mc-sec-graf">
+                    <h2 class="section-title">Del Ingreso al EBITDA</h2>
+                    <p class="seccion-subtitulo" id="eb-cascada-sub">—</p>
+                    <div class="eb-tramo-tit">1 · De los ingresos al EBIT</div>
+                    <div class="eb-cascada-wrap"><canvas id="chartEBCascada"></canvas></div>
+                    <div class="eb-tramo-tit">2 · Del EBIT al EBITDA</div>
+                    <div class="eb-cascada-wrap"><canvas id="chartEBCascada2"></canvas></div>
+                </div>
+            </div>
+            <div class="section acc-graficos mc-blanco">
+                <h2 class="section-title">EBIT, EBITDA sin Provisiones y EBITDA por Mes</h2>
+                <p class="seccion-subtitulo">Acumulado del año (millones) · cada mes: EBIT, EBITDA sin provisiones y EBITDA medidos desde cero · la diferencia entre columnas es lo que suman depreciaciones y provisiones · seis meses a la vista, desplázate con la barra inferior</p>
+                <div class="mc-leyenda"><span>Orden en cada mes: <b>EBIT</b> · <b>EBITDA sin provisiones</b> · <b>EBITDA</b></span>
+                    <span><i style="background:#9BD3AE"></i><i style="background:#4CAF6E;margin-left:-2px"></i><i style="background:#11782C;margin-left:-2px"></i>positivo</span>
+                    <span><i style="background:#D6403A"></i>EBIT negativo</span><span><i style="background:#F08A24"></i>EBITDA sin provisiones negativo</span><span><i style="background:#B42318"></i>EBITDA negativo</span></div>
+                <div class="mc-graf-wrap"><div class="mc-eje" id="eb-comp-eje"></div>
+                <div class="mc-graf-scroll" id="eb-comp-scroll"><div class="mc-graf-inner" id="eb-comp-inner"><canvas id="chartEBComp"></canvas></div></div></div>
+            </div>
+            <div class="section acc-graficos mc-blanco">
+                <h2 class="section-title">Margen EBITDA frente a sus Quintiles</h2>
+                <p class="seccion-subtitulo">Franjas de fondo = quintiles del histórico del margen · desplázate con la barra inferior</p>
+                <div class="mc-leyenda" id="eb-marg-leyenda"></div>
+                <div class="mc-graf-wrap"><div class="mc-eje" id="eb-marg-eje"></div>
+                <div class="mc-graf-scroll" id="eb-marg-scroll"><div class="mc-graf-inner" id="eb-marg-inner"><canvas id="chartEBMargen"></canvas></div></div></div>
+            </div>
+            <div class="section mc-blanco">
+                <h2 class="section-title">Cálculo del EBITDA por Mes</h2>
+                <p class="seccion-subtitulo">Millones de pesos · acumulado del año · igual a la hoja EBITDA del Excel · desplázate con la barra inferior</p>
+                <div class="mc-graf-scroll mc-tablero-wrap" id="eb-tabla-scroll"><table class="solv-resumen-tabla mc-tablero eb-tabla" id="eb-tabla"></table></div>
+            </div>
         </div>
 
         <!-- ========== MÓDULO: MAT (MODELO DE ALERTA TEMPRANA) ========== -->
@@ -12955,6 +13164,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const DATOS_MATCAMEL = {json.dumps(mat_camel, default=_json_default, ensure_ascii=False)};
         const PARAMETROS_MC = {json.dumps(parametros_mc or {}, default=_json_default, ensure_ascii=False)};
         const DATOS_CARTERA_PROV = {json.dumps(cartera_provision or [], default=_json_default, ensure_ascii=False)};
+        const DATOS_EBITDA = {json.dumps(ebitda or [], default=_json_default, ensure_ascii=False)};
 
         // ===== SERIES DE COMPOSICIÓN (Numerador / Denominador) =====
         const SERIE_SOLVENCIA_NUM = {json.dumps(serie_solvencia_num, default=_json_default)};
@@ -14059,6 +14269,347 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 }});
             }});
             await _xGuardar(wb, `Cartera_y_Provision_${{eA.replace(/ /g, '_')}}_vs_${{eB.replace(/ /g, '_')}}.xlsx`);
+        }}
+
+        // ===== MÓDULO: EBITDA (acumulado del año, como la hoja «EBITDA» del Excel) =====
+        const EB_STATE = {{ inic: false, idx: 0, cascada: null, hist: null }};
+        const EB_MIN = -10, EB_MAX = 30;   // escala del velocímetro (% de margen)
+        const _ebM = v => v === null || v === undefined || isNaN(v) ? '—' : (v / 1e6).toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+        const _ebP = v => v === null || v === undefined || !isFinite(v) ? '—' : (v * 100).toFixed(2).replace('.', ',') + '%';
+        const _ebEtq = r => `${{(MESES_NOMBRE[r.mes] || r.mes).substring(0, 3)}}-${{String(r.anio).substring(2)}}`;
+        const _ebLarga = r => `${{MESES_NOMBRE[r.mes] || r.mes}} ${{r.anio}}`;
+        function abrirEBITDA() {{
+            ocultarTodosLosModulos();
+            document.getElementById('ebitda-root').classList.remove('oculto');
+            if (!EB_STATE.inic) {{
+                EB_STATE.inic = true;
+                _poblarFiltrosModulo(DATOS_EBITDA, 'eb-filtro-anio', 'eb-filtro-mes', () => {{
+                    const k = DATOS_EBITDA.findIndex(r => r.anio === +document.getElementById('eb-filtro-anio').value && r.mes === document.getElementById('eb-filtro-mes').value);
+                    if (k >= 0) {{ EB_STATE.idx = k; renderEBITDA(); }}
+                }});
+                EB_STATE.idx = DATOS_EBITDA.length - 1;
+                renderEBITDA();
+            }}
+            window.scrollTo({{ top: 0, behavior: 'instant' }});
+        }}
+        // Velocímetro del margen EBITDA (escala de −10% a 30%)
+        function _dibujarVelocimetroEB(svgId, margen, niveles, escala) {{
+            const EB_MIN = escala ? escala.min : -10, EB_MAX = escala ? escala.max : 30;
+            const rango = EB_MAX - EB_MIN, paso = rango > 40 ? 10 : rango > 20 ? 5 : rango > 10 ? 2 : 1;
+            const cx = 160, cy = 140, R = 112, A0 = 150, BARRIDO = 240;
+            const pos = v => (Math.max(EB_MIN, Math.min(EB_MAX, v)) - EB_MIN) / (EB_MAX - EB_MIN);
+            const ang = v => (A0 + BARRIDO * pos(v)) * Math.PI / 180;
+            const pt = (v, r) => [cx + r * Math.cos(ang(v)), cy + r * Math.sin(ang(v))];
+            const arco = (v1, v2, r) => {{ const [x1, y1] = pt(v1, r), [x2, y2] = pt(v2, r);
+                return `M ${{x1.toFixed(2)}} ${{y1.toFixed(2)}} A ${{r}} ${{r}} 0 0 1 ${{x2.toFixed(2)}} ${{y2.toFixed(2)}}`; }};
+            const pct = margen === null || margen === undefined ? null : margen * 100;
+            let s = `<defs><radialGradient id="${{svgId}}-cara" cx="50%" cy="45%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#eef1f4"/></radialGradient>
+                     <linearGradient id="${{svgId}}-aguja" x1="0" x2="1"><stop offset="0%" stop-color="#2b3a55"/><stop offset="100%" stop-color="#0f172a"/></linearGradient></defs>`;
+            s += `<circle cx="${{cx}}" cy="${{cy}}" r="138" fill="url(#${{svgId}}-cara)" stroke="#dfe3e8" stroke-width="3"/>`;
+            const seg = rango / 60;
+            for (let k = 0; k < 60; k++) {{
+                const v = EB_MIN + k * seg, n = _nivelDe(niveles, v + seg / 2);
+                s += `<path d="${{arco(v, v + seg, R)}}" stroke="${{n ? n.color : '#cbd5e1'}}" stroke-width="20" fill="none"/>`;
+            }}
+            for (let v = Math.ceil(EB_MIN / (paso / 2)) * (paso / 2); v <= EB_MAX + 1e-9; v += paso / 2) {{
+                const mayor = Math.abs(v / paso - Math.round(v / paso)) < 1e-9;
+                const [x1, y1] = pt(v, R - 10), [x2, y2] = pt(v, R + 10);
+                s += `<line x1="${{x1.toFixed(1)}}" y1="${{y1.toFixed(1)}}" x2="${{x2.toFixed(1)}}" y2="${{y2.toFixed(1)}}" stroke="#ffffff" stroke-width="${{mayor ? 3 : 0.8}}"/>`;
+                if (mayor) {{ const [tx, ty] = pt(v, R - 30);
+                    s += `<text x="${{tx.toFixed(1)}}" y="${{ty.toFixed(1)}}" text-anchor="middle" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#475569" font-family="Poppins, sans-serif">${{v}}%</text>`; }}
+            }}
+            if (pct !== null) {{
+                const a = ang(pct), [px, py] = pt(pct, R - 8);
+                const b1 = [cx + 7 * Math.cos(a + Math.PI / 2), cy + 7 * Math.sin(a + Math.PI / 2)], b2 = [cx + 7 * Math.cos(a - Math.PI / 2), cy + 7 * Math.sin(a - Math.PI / 2)];
+                s += `<polygon points="${{b1[0].toFixed(1)}},${{b1[1].toFixed(1)}} ${{px.toFixed(1)}},${{py.toFixed(1)}} ${{b2[0].toFixed(1)}},${{b2[1].toFixed(1)}}" fill="url(#${{svgId}}-aguja)" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.25))"/>`;
+            }}
+            s += `<circle cx="${{cx}}" cy="${{cy}}" r="16" fill="#1f2937"/><circle cx="${{cx - 4}}" cy="${{cy - 5}}" r="5" fill="#94a3b8" opacity="0.6"/>`;
+            s += `<text x="${{cx}}" y="${{cy + 30}}" text-anchor="middle" font-size="12.5" fill="#64748b" font-family="Poppins, sans-serif" font-weight="600">MARGEN EBITDA</text>`;
+            const n = _nivelDe(niveles, pct);
+            s += `<rect x="${{cx - 58}}" y="${{cy + 40}}" width="116" height="32" rx="9" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+                  <text x="${{cx}}" y="${{cy + 62}}" text-anchor="middle" font-size="19" font-weight="700" fill="#1f2937" font-family="Poppins, sans-serif">${{_ebP(margen)}}</text>`;
+            s += `<rect x="${{cx - 48}}" y="${{cy + 78}}" width="96" height="22" rx="11" fill="${{n ? n.color : '#64748b'}}"/>
+                  <text x="${{cx}}" y="${{cy + 93}}" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" font-family="Poppins, sans-serif">${{n ? n.nivel : '—'}}</text>`;
+            document.getElementById(svgId).innerHTML = s;
+        }}
+        function _kpiEB(label, sub, txt, v, p, color, esPct, principal, accion) {{
+            let badge = '';
+            if (v !== null && v !== undefined && p !== null && p !== undefined) {{
+                const d = v - p, cero = esPct ? Math.abs(d) < 0.00005 : Math.abs(d) < 0.5;
+                const cls = cero ? 'igual' : (d > 0 ? 'sube' : 'baja');
+                badge = `<span class="dep-crec ${{cls}}" title="vs mes anterior">${{cero ? '▬' : (d > 0 ? '▲' : '▼')}} ${{esPct ? (d >= 0 ? '+' : '') + (d * 100).toFixed(2).replace('.', ',') + ' pp' : (d >= 0 ? '+' : '') + _ebM(d)}}</span>`;
+            }}
+            return `<div class="mc-kpi-fila${{principal ? ' principal' : ''}}" style="--c:${{color}};">
+                <span class="mc-kpi-lbl">${{accion ? _lupaMC(accion) : ''}}${{label}}<small>${{sub}}</small></span><span class="mc-kpi-val">${{txt}}</span><span class="mc-kpi-var">${{badge}}</span></div>`;
+        }}
+        // Lupa: detalle del cálculo del mes frente al mes anterior
+        function verDetalleEB(tipo) {{
+            const i = EB_STATE.idx, r = DATOS_EBITDA[i], p = i > 0 ? DATOS_EBITDA[i - 1] : null;
+            const eA = _ebLarga(r), eB = p ? _ebLarga(p) : '—';
+            if (tipo === 'nivel') {{
+                const fmtP = v => v.toFixed(2).replace('.', ',') + '%';
+                const filas = r.niveles.map(n => `<tr class="${{n.nivel === r.nivel ? 'mc-rango-activo' : ''}}"><td><i class="cp-dot" style="background:${{n.color}}"></i>Quintil ${{n.quintil}} · <b>${{n.nivel}}</b></td>
+                    <td class="num">${{_textoRangoMC(n.desde, n.hasta, fmtP)}}</td><td>${{n.nivel === r.nivel ? '◄ ' + _ebP(r.margen) : ''}}</td></tr>`).join('');
+                const margenes = DATOS_EBITDA.map(x => x.margen).filter(x => x !== null);
+                _modalMC('Nivel del margen EBITDA', `${{eA}} · quintiles del histórico de ${{r.escala.n}} meses`,
+                    `<div class="mc-explica"><div><b>Cómo se calcula</b><br>Se ordenan los márgenes EBITDA de todos los meses del histórico y se parten en cinco grupos del mismo tamaño (quintiles). Cada mes queda en el grupo que le corresponde frente a su propia historia. Los límites se recalculan cada mes y se guardan en la hoja EBITDA_Niveles de parametros.xlsx.</div>
+                     <div><b>Margen del mes</b><br>EBITDA ÷ ingresos operacionales = ${{_ebM(r.ebitda)}} ÷ ${{_ebM(r.ingresos)}} = <b>${{_ebP(r.margen)}}</b> → <b>${{r.nivel || '—'}}</b></div></div>
+                     <table class="solv-resumen-tabla mc-rangos"><thead><tr><th>Quintil</th><th class="num">Rango del margen</th><th></th></tr></thead><tbody>${{filas}}</tbody></table>
+                     <p class="mc-nota">Mínimo histórico ${{_ebP(Math.min(...margenes))}} · máximo histórico ${{_ebP(Math.max(...margenes))}}. Los nombres y colores de cada quintil se configuran en la hoja EBITDA_Niveles.</p>`);
+                return;
+            }}
+            const L = [['Ingresos operacionales', '41', 'ingresos', '+'], ['Costo de ventas', '6', 'costo', '−'], ['Gastos de administración', '51', 'gastos', '−']];
+            const pasos = tipo === 'ebit' ? [] : (tipo === 'sinprov'
+                ? [['Depreciaciones', '5125', 'depreciaciones', '+'], ['Amortizaciones', '5120', 'amortizaciones', '+']]
+                : [['Provisiones', '5115', 'provisiones', '+'], ['Amortizaciones', '5120', 'amortizaciones', '+'], ['Depreciaciones', '5125', 'depreciaciones', '+']]);
+            const fila = ([nom, cta, k, sg]) => {{
+                const a = r[k], b = p ? p[k] : null;
+                return `<tr><td><b class="eb-signo">${{sg}}</b> ${{nom}}</td><td class="num eb-cta">${{cta}}</td><td class="num">${{_ebM(a)}}</td><td class="num">${{_ebM(b)}}</td><td class="num">${{b === null ? '—' : _ebM(a - b)}}</td></tr>`;
+            }};
+            const total = (nom, k) => {{ const a = r[k], b = p ? p[k] : null;
+                return `<tr class="eb-fila-total"><td>${{nom}}</td><td></td><td class="num">${{_ebM(a)}}</td><td class="num">${{_ebM(b)}}</td><td class="num">${{b === null ? '—' : _ebM(a - b)}}</td></tr>`; }};
+            let cuerpo = L.map(fila).join('') + total('= EBIT', 'ebit');
+            if (tipo !== 'ebit') {{
+                cuerpo += pasos.map(fila).join('') + total(tipo === 'sinprov' ? '= EBITDA sin provisiones' : '= EBITDA', tipo === 'sinprov' ? 'sin_prov' : 'ebitda');
+                const m = tipo === 'sinprov' ? 'margen_sin_prov' : 'margen';
+                cuerpo += `<tr class="eb-fila-pct"><td>Margen = ${{tipo === 'sinprov' ? 'EBITDA sin provisiones' : 'EBITDA'}} ÷ ingresos</td><td></td><td class="num">${{_ebP(r[m])}}</td><td class="num">${{p ? _ebP(p[m]) : '—'}}</td><td class="num">${{p ? ((r[m] - p[m]) * 100).toFixed(2).replace('.', ',') + ' pp' : '—'}}</td></tr>`;
+            }}
+            const titulos = {{ ebitda: 'EBITDA', ebit: 'EBIT', sinprov: 'EBITDA sin provisiones' }};
+            const formulas = {{ ebit: 'EBIT = 41 − 6 − 51', ebitda: 'EBITDA = EBIT + 5115 + 5120 + 5125',
+                               sinprov: 'EBITDA sin provisiones = EBIT + 5120 + 5125 (no suma las provisiones 5115)' }};
+            _modalMC(`Cálculo del ${{titulos[tipo]}}`, `${{eA}} frente a ${{eB}} · acumulado del año · millones de pesos`,
+                `<p class="mc-nota" style="margin-top:0"><b>${{formulas[tipo]}}</b></p>
+                 <table class="solv-resumen-tabla eb-tabla eb-detalle"><thead><tr><th>Concepto</th><th class="num">Cuenta</th><th class="num">${{eA}}</th><th class="num">${{eB}}</th><th class="num">Variación</th></tr></thead><tbody>${{cuerpo}}</tbody></table>
+                 <p class="mc-nota">Saldos acumulados del año tomados del balance de cada mes.${{tipo === 'sinprov' ? ' En entidades que prestan dinero las provisiones de cartera son el costo del riesgo de crédito; por eso esta lectura no las suma.' : ''}}</p>`);
+        }}
+        function renderEBITDA() {{
+            const i = EB_STATE.idx, r = DATOS_EBITDA[i], p = i > 0 ? DATOS_EBITDA[i - 1] : null;
+            _dibujarVelocimetroEB('eb-gauge', r.margen, r.niveles, r.escala);
+            document.getElementById('eb-kpis').innerHTML =
+                _kpiEB('EBITDA', `${{_ebLarga(r)}} · acumulado del año · millones`, _ebM(r.ebitda), r.ebitda, p && p.ebitda, r.ebitda >= 0 ? '#17A53D' : '#C91A15', false, true, "verDetalleEB('ebitda')") +
+                _kpiEB('EBIT', 'ingresos − costo − gastos de administración', _ebM(r.ebit), r.ebit, p && p.ebit, r.ebit >= 0 ? '#1E7F73' : '#C91A15', false, false, "verDetalleEB('ebit')") +
+                _kpiEB('EBITDA sin provisiones', 'lectura conservadora · margen ' + _ebP(r.margen_sin_prov), _ebM(r.sin_prov), r.sin_prov, p && p.sin_prov, r.sin_prov >= 0 ? '#4D61B4' : '#C91A15', false, false, "verDetalleEB('sinprov')") +
+                _kpiEB('Nivel del margen', `quintil ${{(r.niveles.find(n => n.nivel === r.nivel) || {{}}).quintil || '—'}} del histórico de ${{r.escala.n}} meses`,
+                       `<span class="mc-nivel" style="background:${{r.color}};font-size:13px;">${{r.nivel || '—'}}</span>`, null, null, r.color, false, false, "verDetalleEB('nivel')");
+            document.getElementById('eb-cascada-sub').textContent = `${{_ebLarga(r)}} · acumulado del año · millones de pesos`;
+            _cascadaEB(r);
+            _historicoEB();
+            _tablaEB();
+        }}
+        // Cascada en dos tramos con su propia escala: ingresos → EBIT y EBIT → EBITDA
+        function _cascadaEB(r) {{
+            const M = v => v / 1e6;
+            const color = {{ ingreso: '#1E7F73', resta: '#D6403A', suma: '#17A53D', total: '#334155', parcial: '#4D61B4', final: r.ebitda >= 0 ? '#11782C' : '#C91A15' }};
+            const dibujar = (canvasId, clave, pasos) => {{
+                if (EB_STATE[clave]) EB_STATE[clave].destroy();
+                const fuerte = t => ['total', 'final', 'parcial'].includes(t);
+                EB_STATE[clave] = new Chart(document.getElementById(canvasId), {{
+                    type: 'bar',
+                    data: {{ labels: pasos.map(x => x.etq), datasets: [{{
+                        data: pasos.map(x => [x.ini, x.fin]),
+                        backgroundColor: pasos.map(x => color[x.tipo] + (fuerte(x.tipo) ? '' : 'D9')),
+                        borderRadius: 6, borderSkipped: false, maxBarThickness: 64, categoryPercentage: 0.82, barPercentage: 0.88
+                    }}] }},
+                    options: {{
+                        responsive: true, maintainAspectRatio: false, animation: {{ duration: 400 }},
+                        layout: {{ padding: {{ top: 24, bottom: 4, right: 8, left: 4 }} }},
+                        plugins: {{
+                            legend: {{ display: false }},
+                            tooltip: {{ callbacks: {{ title: it => it.length ? [].concat(pasos[it[0].dataIndex].etq).join(' ') : '', label: c => ' ' + _ebM(pasos[c.dataIndex].v * 1e6) }} }},
+                            datalabels: {{
+                                anchor: c => pasos[c.dataIndex].fin >= pasos[c.dataIndex].ini ? 'end' : 'start',
+                                align: c => pasos[c.dataIndex].fin >= pasos[c.dataIndex].ini ? 'end' : 'start',
+                                offset: 2, clamp: true, clip: false,
+                                formatter: (_, c) => {{ const x = pasos[c.dataIndex]; return (x.tipo === 'suma' ? '+' : '') + _ebM(x.v * 1e6); }},
+                                color: c => color[pasos[c.dataIndex].tipo],
+                                font: c => ({{ size: 12, weight: fuerte(pasos[c.dataIndex].tipo) ? '800' : '600' }})
+                            }}
+                        }},
+                        scales: {{
+                            y: {{ grace: '12%', border: {{ display: false }},
+                                 grid: {{ color: c => (c.tick && c.tick.value === 0) ? '#64748b' : '#f1f5f9', lineWidth: c => (c.tick && c.tick.value === 0) ? 1.6 : 1 }},
+                                 ticks: {{ callback: v => v.toLocaleString('es-CO'), color: c => (c.tick && c.tick.value === 0) ? '#334155' : '#94a3b8',
+                                          font: c => ({{ size: 11, weight: (c.tick && c.tick.value === 0) ? '700' : '400' }}) }} }},
+                            x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 0, autoSkip: false, color: '#475569',
+                                 font: c => ({{ size: 11, weight: fuerte(pasos[c.index].tipo) ? '800' : '500' }}) }} }}
+                        }}
+                    }},
+                    plugins: [{{
+                        id: 'conectoresEB',   // línea punteada del final de cada barra al inicio de la siguiente
+                        afterDatasetsDraw(ch) {{
+                            const meta = ch.getDatasetMeta(0), y = ch.scales.y, g = ch.ctx;
+                            g.save(); g.setLineDash([4, 3]); g.strokeStyle = '#94a3b8'; g.lineWidth = 1.2;
+                            for (let k = 0; k < pasos.length - 1; k++) {{
+                                const a = meta.data[k], b = meta.data[k + 1];
+                                if (!a || !b) continue;
+                                const yy = y.getPixelForValue(pasos[k].fin);
+                                g.beginPath(); g.moveTo(a.x + a.width / 2, yy); g.lineTo(b.x - b.width / 2, yy); g.stroke();
+                            }}
+                            g.restore();
+                        }}
+                    }}]
+                }});
+            }};
+            const tramo = () => {{ let acum = 0; const pasos = [];
+                return {{ pasos, mov: (etq, v, tipo) => {{ const ini = acum; acum += v; pasos.push({{ etq, ini, fin: acum, v, tipo }}); }},
+                         tot: (etq, tipo) => pasos.push({{ etq, ini: 0, fin: acum, v: acum, tipo }}),
+                         ini: v => {{ acum = v; }} }}; }};
+            const a = tramo();
+            a.mov('Ingresos', M(r.ingresos), 'ingreso');
+            a.mov(['− Costo', 'de ventas'], -M(r.costo), 'resta');
+            a.mov(['− Gastos de', 'administración'], -M(r.gastos), 'resta');
+            a.tot('EBIT', 'total');
+            dibujar('chartEBCascada', 'cascada', a.pasos);
+            const b = tramo();
+            b.pasos.push({{ etq: 'EBIT', ini: 0, fin: M(r.ebit), v: M(r.ebit), tipo: 'total' }}); b.ini(M(r.ebit));
+            b.mov('+ Depreciaciones', M(r.depreciaciones), 'suma');
+            b.mov('+ Amortizaciones', M(r.amortizaciones), 'suma');
+            b.tot(['EBITDA sin', 'provisiones'], 'parcial');
+            b.mov('+ Provisiones', M(r.provisiones), 'suma');
+            b.tot('EBITDA', 'final');
+            dibujar('chartEBCascada2', 'cascada2', b.pasos);
+        }}
+        // Histórico en dos gráficos: composición del EBITDA y margen frente a sus quintiles (sin filtrar al hacer clic)
+        function _historicoEB() {{
+            const n = DATOS_EBITDA.length, i0 = EB_STATE.idx, ANCHO = 74, M = v => v / 1e6;
+            const etq = DATOS_EBITDA.map(_ebEtq);
+            const preparar = (scrollId, innerId, meses) => {{
+                const sc = document.getElementById(scrollId), inner = document.getElementById(innerId);
+                const ancho = meses ? Math.max(ANCHO, (sc.clientWidth || 900) / meses) : ANCHO;
+                inner.style.width = Math.max(sc.clientWidth || 900, n * ancho) + 'px';
+                const ir = () => {{ sc.scrollLeft = sc.scrollWidth; }};
+                ir(); setTimeout(ir, 80);
+            }};
+            const ejeX = {{ grid: {{ display: false }}, stacked: true, ticks: {{ maxRotation: 0, autoSkip: false,
+                           font: c => ({{ size: 10.5, weight: c.index === i0 ? '800' : '500' }}), color: c => c.index === i0 ? '#11782C' : '#64748b' }} }};
+            // a) Tres columnas por mes medidas desde el cero: EBIT, EBITDA sin provisiones y EBITDA
+            preparar('eb-comp-scroll', 'eb-comp-inner', 6);   // seis meses a la vista
+            if (EB_STATE.hist) EB_STATE.hist.destroy();
+            // Colores por signo: verdes si es positivo; rojo / naranja si es negativo
+            const serieCol = (label, campo, pos, neg, conEtiqueta) => ({{
+                label, data: DATOS_EBITDA.map(r => M(r[campo])),
+                backgroundColor: DATOS_EBITDA.map((r, k) => (r[campo] >= 0 ? pos : neg) + (k === i0 ? '' : 'C4')),
+                borderColor: DATOS_EBITDA.map((_, k) => k === i0 ? '#1f2937' : 'transparent'), borderWidth: DATOS_EBITDA.map((_, k) => k === i0 ? 1.5 : 0),
+                borderRadius: 5, borderSkipped: false, maxBarThickness: 44, categoryPercentage: 0.72, barPercentage: 0.86,
+                datalabels: {{ display: true, anchor: 'end', align: 'end', offset: 4, clamp: false, clip: false,
+                               color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0f5132' : (neg === '#D6403A' ? '#B42318' : '#B45309'),
+                               font: c => ({{ size: c.dataIndex === i0 ? 12 : 11, weight: conEtiqueta ? '800' : '700' }}),
+                               formatter: v => v.toLocaleString('es-CO', {{ maximumFractionDigits: 0 }}) }}
+            }});
+            EB_STATE.hist = new Chart(document.getElementById('chartEBComp'), {{
+                type: 'bar',
+                data: {{ labels: etq, datasets: [
+                    serieCol('EBIT', 'ebit', '#9BD3AE', '#D6403A', false),
+                    serieCol('EBITDA sin provisiones', 'sin_prov', '#4CAF6E', '#F08A24', false),
+                    serieCol('EBITDA', 'ebitda', '#11782C', '#B42318', true)
+                ] }},
+                options: {{
+                    responsive: true, maintainAspectRatio: false, animation: {{ duration: 300 }},
+                    interaction: {{ mode: 'index', intersect: false }}, layout: {{ padding: {{ top: 26, bottom: 18 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        zonasMC: {{ niveles: [], ejeId: 'eb-comp-eje', fmtEje: v => v.toLocaleString('es-CO') }},
+                        tooltip: {{ callbacks: {{
+                            title: it => it.length ? _ebLarga(DATOS_EBITDA[it[0].dataIndex]) : '',
+                            label: c => ` ${{c.dataset.label}}: ${{_ebM(c.parsed.y * 1e6)}}`,
+                            afterBody: it => {{ if (!it.length) return ''; const r = DATOS_EBITDA[it[0].dataIndex];
+                                return [` Provisiones (5115): ${{_ebM(r.provisiones)}}`, ` Depreciaciones y amortizaciones: ${{_ebM(r.depreciaciones + r.amortizaciones)}}`]; }} }} }}
+                    }},
+                    scales: {{ y: {{ grace: '22%', grid: {{ color: c => (c.tick && c.tick.value === 0) ? '#64748b' : '#f1f5f9', lineWidth: c => (c.tick && c.tick.value === 0) ? 1.5 : 1 }},
+                                   border: {{ display: false }}, ticks: {{ display: false }} }},
+                              x: Object.assign({{}}, ejeX, {{ stacked: false }}) }}
+                }},
+                plugins: [PLUGIN_ZONAS_MC]
+            }});
+            // b) Margen EBITDA con las franjas de los quintiles del histórico
+            preparar('eb-marg-scroll', 'eb-marg-inner');
+            const r0 = DATOS_EBITDA[i0];
+            document.getElementById('eb-marg-leyenda').innerHTML = r0.niveles.map(nv =>
+                `<span><i style="background:${{nv.color}}"></i>${{nv.nivel}} · ${{_textoRangoMC(nv.desde, nv.hasta, v => v.toFixed(2).replace('.', ',') + '%')}}</span>`).join('');
+            if (EB_STATE.marg) EB_STATE.marg.destroy();
+            const serie = DATOS_EBITDA.map(r => r.margen === null ? null : r.margen * 100);
+            EB_STATE.marg = new Chart(document.getElementById('chartEBMargen'), {{
+                type: 'line',
+                data: {{ labels: etq, datasets: [{{ label: 'Margen EBITDA', data: serie, borderColor: '#0E6B2A', borderWidth: 2.4, tension: 0.3, fill: false,
+                    pointRadius: DATOS_EBITDA.map((_, k) => k === i0 ? 6 : 3.5), pointBackgroundColor: DATOS_EBITDA.map(r => r.color), pointBorderColor: '#ffffff', pointBorderWidth: 1.5,
+                    datalabels: {{ display: c => c.dataIndex === i0 ? true : 'auto', align: 'top', offset: 6, color: '#1f2937',
+                                  font: c => ({{ size: c.dataIndex === i0 ? 12 : 10.5, weight: c.dataIndex === i0 ? '800' : '600' }}),
+                                  formatter: v => v === null ? '' : v.toFixed(1).replace('.', ',') + '%' }} }}] }},
+                options: {{
+                    responsive: true, maintainAspectRatio: false, animation: {{ duration: 300 }}, layout: {{ padding: {{ top: 24 }} }},
+                    plugins: {{
+                        legend: {{ display: false }},
+                        zonasMC: {{ niveles: r0.niveles, ejeId: 'eb-marg-eje', fmtEje: v => v.toFixed(0) + '%' }},
+                        tooltip: {{ callbacks: {{ title: it => it.length ? _ebLarga(DATOS_EBITDA[it[0].dataIndex]) : '',
+                                                label: c => ` ${{c.parsed.y.toFixed(2).replace('.', ',')}}% · ${{DATOS_EBITDA[c.dataIndex].nivel || ''}}` }} }}
+                    }},
+                    scales: {{ y: {{ min: r0.escala.min, max: r0.escala.max, grid: {{ color: '#f1f5f9' }}, border: {{ display: false }}, ticks: {{ display: false }} }},
+                              x: Object.assign({{}}, ejeX, {{ stacked: false }}) }}
+                }},
+                plugins: [PLUGIN_ZONAS_MC]
+            }});
+        }}
+        // Tabla igual a la hoja del Excel: conceptos en filas y meses en columnas (del más reciente al más antiguo)
+        function _tablaEB() {{
+            const idxs = [...DATOS_EBITDA.keys()];
+            const filas = [
+                ['Ingresos operacionales', '41', r => r.ingresos], ['Costo de ventas', '6', r => r.costo], ['Gastos de administración', '51', r => r.gastos],
+                ['EBIT', '', r => r.ebit, 'total'],
+                ['Provisiones', '5115', r => r.provisiones], ['Amortizaciones', '5120', r => r.amortizaciones], ['Depreciaciones', '5125', r => r.depreciaciones],
+                ['EBITDA', '', r => r.ebitda, 'total'], ['Margen del EBITDA', '', r => r.margen, 'pct'],
+                ['EBITDA sin provisiones', '', r => r.sin_prov, 'alt'], ['Margen sin provisiones', '', r => r.margen_sin_prov, 'pctalt']
+            ];
+            let h = `<thead><tr><th class="mc-tab-fija">Concepto</th><th>Cuenta</th>${{idxs.map(k => `<th class="${{k === EB_STATE.idx ? 'mc-tab-actual' : ''}}">${{(MESES_NOMBRE[DATOS_EBITDA[k].mes] || '').slice(0, 3)}} ${{DATOS_EBITDA[k].anio}}</th>`).join('')}}</tr></thead><tbody>`;
+            filas.forEach(([nom, cta, fn, tipo]) => {{
+                const cls = tipo === 'total' ? 'eb-fila-total' : tipo === 'pct' ? 'eb-fila-pct' : (tipo === 'alt' || tipo === 'pctalt') ? 'eb-fila-alt' : '';
+                h += `<tr class="${{cls}}"><td class="mc-tab-fija">${{nom}}</td><td class="eb-cta">${{cta}}</td>` + idxs.map(k => {{
+                    const v = fn(DATOS_EBITDA[k]);
+                    const txt = tipo && tipo.startsWith('pct') ? _ebP(v) : _ebM(v);
+                    const neg = v !== null && v < 0 ? ' eb-neg' : '';
+                    return `<td class="num${{k === EB_STATE.idx ? ' mc-tab-actual' : ''}}${{neg}}">${{txt}}</td>`;
+                }}).join('') + '</tr>';
+            }});
+            document.getElementById('eb-tabla').innerHTML = h + '</tbody>';
+            const sc = document.getElementById('eb-tabla-scroll');
+            const ir = () => {{ sc.scrollLeft = sc.scrollWidth; }};
+            ir(); setTimeout(ir, 80);
+        }}
+        function volverAlSubmenuIngresosDesdeEBITDA() {{ volverAlSubmenuIngresos(); }}
+        // Excel rastreable: misma estructura de la hoja «EBITDA» con las cuentas y fórmulas
+        async function descargarExcelEBITDA() {{
+            const AC = 'FF11782C', idxs = [...DATOS_EBITDA.keys()];
+            const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
+            wb.calcProperties.fullCalcOnLoad = true;
+            const ws = wb.addWorksheet('EBITDA', {{ views: [{{ state: 'frozen', xSplit: 2, ySplit: 5, showGridLines: false, topLeftCell: 'C6' }}] }});
+            ws.columns = [{{ width: 30 }}, {{ width: 9 }}, ...idxs.map(() => ({{ width: 15 }}))];
+            _xTitulo(ws, 'EBITDA · cifras acumuladas del año (millones de pesos)',
+                     'EBIT = 41 − 6 − 51 · EBITDA = EBIT + 5115 + 5120 + 5125 · Margen = EBITDA ÷ ingresos operacionales', idxs.length + 2, AC);
+            _xEncabezado(ws, 4, ['', '', ...idxs.map(k => String(DATOS_EBITDA[k].anio))], AC);
+            _xEncabezado(ws, 5, ['Concepto', 'Cuenta', ...idxs.map(k => MESES_NOMBRE[DATOS_EBITDA[k].mes] || DATOS_EBITDA[k].mes)], AC);
+            const MM = '#,##0.00,,;[Red](#,##0.00,,);"-"', PC = '0.00%';
+            const L = j => ws.getColumn(j + 3).letter;
+            const fila = (f, nom, cta, valor, fmt, st) => {{
+                _xCelda(ws, f, 1, nom, Object.assign({{ bold: !!st }}, st || {{}}));
+                _xCelda(ws, f, 2, cta, Object.assign({{ align: 'center', color: COLOR.GRIS_MEDIO }}, st || {{}}));
+                idxs.forEach((k, j) => _xCelda(ws, f, j + 3, valor(DATOS_EBITDA[k], L(j)), Object.assign({{ format: fmt }}, st || {{}})));
+            }};
+            const T = {{ fill: 'FFDCEFE2', bold: true }}, A = {{ fill: COLOR.GRIS_CLARO }};
+            fila(6, 'Ingresos operacionales', '41', r => r.ingresos, MM);
+            fila(7, 'Costos de ventas', '6', r => r.costo, MM);
+            fila(8, 'Gastos de administración', '51', r => r.gastos, MM);
+            fila(9, 'EBIT', '', (r, c) => ({{ formula: `${{c}}6-${{c}}7-${{c}}8`, result: r.ebit }}), MM, T);
+            fila(11, 'Provisiones', '5115', r => r.provisiones, MM);
+            fila(12, 'Amortizaciones', '5120', r => r.amortizaciones, MM);
+            fila(13, 'Depreciaciones', '5125', r => r.depreciaciones, MM);
+            fila(15, 'EBITDA', '', (r, c) => ({{ formula: `${{c}}9+${{c}}11+${{c}}12+${{c}}13`, result: r.ebitda }}), MM, T);
+            fila(17, 'Margen del EBITDA', '', (r, c) => ({{ formula: `IF(${{c}}6=0,"",${{c}}15/${{c}}6)`, result: r.margen }}), PC, T);
+            fila(19, 'EBITDA sin provisiones', '', (r, c) => ({{ formula: `${{c}}9+${{c}}12+${{c}}13`, result: r.sin_prov }}), MM, A);
+            fila(20, 'Margen sin provisiones', '', (r, c) => ({{ formula: `IF(${{c}}6=0,"",${{c}}19/${{c}}6)`, result: r.margen_sin_prov }}), PC, A);
+            fila(22, 'Nivel del margen', '', r => r.nivel || '—', '@');
+            idxs.forEach((k, j) => _xNivelCelda(ws.getCell(22, j + 3), DATOS_EBITDA[k].color));
+            _xCelda(ws, 24, 1, 'Saldos de las cuentas acumulados del año, tomados del balance de cada mes (valores en pesos con formato de millones).', {{ size: 9, italic: true, color: COLOR.GRIS_MEDIO, border: {{}} }});
+            _xNiveles(ws, 26, DATOS_EBITDA[DATOS_EBITDA.length - 1].niveles, AC, `Niveles del margen EBITDA en %: quintiles del histórico de ${{DATOS_EBITDA.length}} meses (nombres y colores en la hoja EBITDA_Niveles)`);
+            await _xGuardar(wb, `EBITDA_${{_ebLarga(DATOS_EBITDA[EB_STATE.idx]).replace(/ /g, '_')}}.xlsx`);
         }}
         async function _xBoton(btn, fn) {{
             const sp = btn.querySelector('span'), t0 = sp.textContent;
@@ -15174,20 +15725,28 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }} }});
         }}
         async function copiarInstrumentoMC(clave) {{
-            const svg = document.getElementById(clave === 'mat' ? 'mat-gauge' : 'camel-termo');
+            const svg = document.getElementById(clave === 'mat' ? 'mat-gauge' : clave === 'eb' ? 'eb-gauge' : 'camel-termo');
             const vb = svg.viewBox.baseVal, esc = 2.2;
             const clon = svg.cloneNode(true);
             clon.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
             clon.setAttribute('width', vb.width * esc); clon.setAttribute('height', vb.height * esc);
             const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clon));
             const img = await new Promise((ok, mal) => {{ const im = new Image(); im.onload = () => ok(im); im.onerror = mal; im.src = url; }});
-            const r = DATOS_MATCAMEL[MC_STATE[clave].idx];
-            const valor = clave === 'mat' ? r.mat.escala : r.camel.promedio;
-            const n = _nivelDe(_nivelesMC(clave, MC_STATE[clave].idx), valor);
-            const titulo = clave === 'mat' ? 'MAT · Modelo de Alerta Temprana' : 'CAMEL · Calificación promedio';
-            const subtitulo = `${{_etqLargaMC(r)}} · ${{_fmt2(valor)}} · ${{n ? n.nivel : ''}} · parámetros versión ${{r.version}}`;
+            let titulo, subtitulo, niveles, r;
+            if (clave === 'eb') {{
+                r = DATOS_EBITDA[EB_STATE.idx]; niveles = r.niveles;
+                titulo = 'EBITDA · Margen EBITDA';
+                subtitulo = `${{_ebLarga(r)}} · ${{_ebP(r.margen)}} · ${{r.nivel || ''}} · acumulado del año`;
+            }} else {{
+                r = DATOS_MATCAMEL[MC_STATE[clave].idx];
+                const valor = clave === 'mat' ? r.mat.escala : r.camel.promedio;
+                niveles = _nivelesMC(clave, MC_STATE[clave].idx);
+                const n = _nivelDe(niveles, valor);
+                titulo = clave === 'mat' ? 'MAT · Modelo de Alerta Temprana' : 'CAMEL · Calificación promedio';
+                subtitulo = `${{_etqLargaMC(r)}} · ${{_fmt2(valor)}} · ${{n ? n.nivel : ''}} · parámetros versión ${{r.version}}`;
+            }}
             const W = Math.max(420, vb.width * 1.6), H = vb.height * 1.6;
-            const L = _lienzoCopiaMC(titulo, subtitulo, _nivelesMC(clave, MC_STATE[clave].idx), W, H);
+            const L = _lienzoCopiaMC(titulo, subtitulo, niveles, W, H);
             L.g.drawImage(img, L.x + (W - vb.width * 1.6) / 2, L.y, vb.width * 1.6, H);
             const base = 'font-family:Calibri,Arial,sans-serif;font-size:10pt;padding:2px 8px;';
             const html = `<table style="border-collapse:collapse;"><tr><td style="${{base}}font-weight:bold;">${{titulo}}</td></tr><tr><td style="${{base}}">${{subtitulo}}</td></tr></table>`;
@@ -18152,7 +18711,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             'margen-total-root', 'margen-resistencia-root',
             'cartera-activo-root', 'cartera-provision-root', 'depositos-pasivo-root', 'depositos-cartera-root',
             'rent-roe-root', 'rent-mn-root', 'rent-roic-root', 'rent-roa-root',
-            'esf-root', 'eri-root', 'mat-root', 'camel-root'
+            'esf-root', 'eri-root', 'mat-root', 'camel-root', 'ebitda-root'
         ];
         function ocultarTodosLosModulos() {{
             TODOS_LOS_MODULOS.forEach(id => {{
@@ -28654,6 +29213,8 @@ def main():
     cartera_provision = calcular_cartera_provision(df, periodos, todos_morosidad)
     params_mc = leer_parametros_modelos(ruta_parametros)
     mat_camel = calcular_mat_camel(df, periodos, todos_resultados, todos_riesgo, params_mc)
+    ebitda = calcular_ebitda(df, periodos, params_mc)
+    actualizar_quintiles_ebitda(ruta_parametros, ebitda)
     params_mc_json = {h: [{k: (v if v is None or isinstance(v, (int, float, str)) else str(v)) for k, v in fila.items()}
                           for fila in filas] for h, filas in params_mc.items()}
     print(f"   OK: versiones aplicadas {sorted({r['version'] for r in mat_camel})}")
@@ -28702,7 +29263,7 @@ def main():
                  cartera_segmentos=cartera_segmentos,
                  catalogo_cuentas=catalogo_cuentas,
                  estados_financieros=estados_financieros,
-                 mat_camel=mat_camel, parametros_mc=params_mc_json, cartera_provision=cartera_provision)
+                 mat_camel=mat_camel, parametros_mc=params_mc_json, cartera_provision=cartera_provision, ebitda=ebitda)
     print(f"   OK: {ruta_html.name}")
     
     if ABRIR_HTML_AL_TERMINAR:
