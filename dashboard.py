@@ -14586,8 +14586,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 datalabels: {{ display: true, offset: 7, clamp: false, clip: false,
                                anchor: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'start' : 'end',
                                align: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'bottom' : 'top',
-                               color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0b3d20' : (neg === '#D6403A' ? '#9f1c12' : '#9a4a05'),
-                               font: c => ({{ size: (scComp.clientWidth || 900) < 620 ? 11 : (c.dataIndex === i0 ? 14.5 : 13), weight: '800' }}),
+                               color: '#0f172a',
+                               font: c => ({{ size: (scComp.clientWidth || 900) < 620 ? 11 : 13, weight: c.dataIndex === i0 ? '800' : '700' }}),
                                formatter: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}) }}
             }});
             EB_STATE.hist = new Chart(document.getElementById('chartEBComp'), {{
@@ -15003,10 +15003,17 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     const p = chart.canvas.parentElement;
                     const w = Math.max(1, (p && p.clientWidth) || chart.canvas.width || 300);
                     const h = Math.max(1, (p && p.clientHeight) || chart.canvas.height || 300);
-                    const base = Math.min(window.devicePixelRatio || 1, 2);
-                    const tope = Math.sqrt(2500000 / (w * h));     // como máximo ~2,5 millones de píxeles por gráfico
+                    const disp = window.devicePixelRatio || 1;
                     const o = chart.config.options;
-                    if (o && o.devicePixelRatio === undefined) o.devicePixelRatio = Math.max(0.75, Math.min(base, tope));
+                    if (!o || o.devicePixelRatio !== undefined) return;
+                    const celular = Math.min(window.innerWidth, window.innerHeight) < 760;
+                    if (!celular) {{
+                        // Computador: nitidez completa (solo se respeta el ancho máximo de lienzo del navegador)
+                        o.devicePixelRatio = Math.max(1, Math.min(disp, 30000 / w));
+                    }} else {{
+                        // Celular: hasta ~4 millones de píxeles por gráfico, nunca por debajo de la resolución normal
+                        o.devicePixelRatio = Math.max(1, Math.min(disp, 2, Math.sqrt(4000000 / (w * h)), 15000 / w));
+                    }}
                 }} catch (e) {{}}
             }}
         }});
