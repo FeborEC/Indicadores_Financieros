@@ -14464,7 +14464,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                         scales: {{
                             y: {{ grace: '12%', border: {{ display: false }},
                                  grid: {{ color: c => (c.tick && c.tick.value === 0) ? '#64748b' : '#f1f5f9', lineWidth: c => (c.tick && c.tick.value === 0) ? 1.6 : 1 }},
-                                 ticks: {{ callback: v => v.toLocaleString('es-CO'), color: c => (c.tick && c.tick.value === 0) ? '#334155' : '#94a3b8',
+                                 ticks: {{ callback: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}), color: c => (c.tick && c.tick.value === 0) ? '#334155' : '#94a3b8',
                                           font: c => ({{ size: 11, weight: (c.tick && c.tick.value === 0) ? '700' : '400' }}) }} }},
                             x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 0, autoSkip: false, color: '#475569',
                                  font: c => ({{ size: 11, weight: fuerte(pasos[c.index].tipo) ? '800' : '500' }}) }} }}
@@ -14527,10 +14527,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                 backgroundColor: DATOS_EBITDA.map((r, k) => (r[campo] >= 0 ? pos : neg) + (k === i0 ? '' : 'C4')),
                 borderColor: DATOS_EBITDA.map((_, k) => k === i0 ? '#1f2937' : 'transparent'), borderWidth: DATOS_EBITDA.map((_, k) => k === i0 ? 1.5 : 0),
                 borderRadius: 5, borderSkipped: false, maxBarThickness: 44, categoryPercentage: 0.72, barPercentage: 0.86,
-                datalabels: {{ display: true, anchor: 'end', align: 'end', offset: 4, clamp: false, clip: false,
+                datalabels: {{ display: true, offset: 7, clamp: false, clip: false,
+                               anchor: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'start' : 'end',
+                               align: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'bottom' : 'top',
                                color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0b3d20' : (neg === '#D6403A' ? '#9f1c12' : '#9a4a05'),
                                font: c => ({{ size: c.dataIndex === i0 ? 14.5 : 13, weight: '800' }}),
-                               formatter: v => v.toLocaleString('es-CO', {{ maximumFractionDigits: 0 }}) }}
+                               formatter: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}) }}
             }});
             EB_STATE.hist = new Chart(document.getElementById('chartEBComp'), {{
                 type: 'bar',
@@ -14544,7 +14546,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     interaction: {{ mode: 'index', intersect: false }}, layout: {{ padding: {{ top: 26, bottom: 18 }} }},
                     plugins: {{
                         legend: {{ display: false }},
-                        zonasMC: {{ niveles: [], ejeId: 'eb-comp-eje', fmtEje: v => v.toLocaleString('es-CO') }},
+                        zonasMC: {{ niveles: [], ejeId: 'eb-comp-eje', fmtEje: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}) }},
                         tooltip: {{ callbacks: {{
                             title: it => it.length ? _ebLarga(DATOS_EBITDA[it[0].dataIndex]) : '',
                             label: c => ` ${{c.dataset.label}}: ${{_ebM(c.parsed.y * 1e6)}}`,
@@ -14570,12 +14572,12 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     pointRadius: DATOS_EBITDA.map((_, k) => k === i0 ? 6 : 3.5), pointBackgroundColor: DATOS_EBITDA.map(r => r.color), pointBorderColor: '#ffffff', pointBorderWidth: 1.5,
                     datalabels: {{ display: c => c.dataIndex === i0 ? true : 'auto', align: 'top', offset: 6, color: '#1f2937',
                                   font: c => ({{ size: c.dataIndex === i0 ? 12 : 10.5, weight: c.dataIndex === i0 ? '800' : '600' }}),
-                                  formatter: v => v === null ? '' : v.toFixed(1).replace('.', ',') + '%' }} }}] }},
+                                  formatter: v => v === null ? '' : v.toFixed(2).replace('.', ',') + '%' }} }}] }},
                 options: {{
                     responsive: true, maintainAspectRatio: false, animation: {{ duration: 300 }}, layout: {{ padding: {{ top: 24 }} }},
                     plugins: {{
                         legend: {{ display: false }},
-                        zonasMC: {{ niveles: r0.niveles, ejeId: 'eb-marg-eje', fmtEje: v => v.toFixed(0) + '%' }},
+                        zonasMC: {{ niveles: r0.niveles, ejeId: 'eb-marg-eje', fmtEje: v => v.toFixed(2).replace('.', ',') + '%' }},
                         tooltip: {{ callbacks: {{ title: it => it.length ? _ebLarga(DATOS_EBITDA[it[0].dataIndex]) : '',
                                                 label: c => ` ${{c.parsed.y.toFixed(2).replace('.', ',')}}% · ${{DATOS_EBITDA[c.dataIndex].nivel || ''}}` }} }}
                     }},
