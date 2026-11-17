@@ -5953,6 +5953,10 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             .gbar {{ display: flex; justify-content: flex-end; gap: 8px; margin: -2px 0 8px; position: relative; z-index: 6; }}
             .gbar.gbar-flota {{ position: absolute; top: 18px; right: 20px; margin: 0; }}
             .hg-rel {{ position: relative; }}
+            @media (max-width: 760px) {{   /* en celular los botones van en su propio renglón para no tapar el título */
+                .gbar.gbar-flota {{ position: static; margin: 4px 0 8px; flex-wrap: wrap; }}
+                .gbar {{ flex-wrap: wrap; }}
+            }}
             .mc-herr .gbar, .mc-modal-herr .gbar {{ margin: 0; }}
             .gp {{ position: relative; }}
             .gp > button {{ border: 0; background: #fff; box-shadow: 3px 3px 9px #e2e5f4, -3px -3px 9px #ffffff; border-radius: 10px;
@@ -14436,50 +14440,68 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         function _cascadaEB(r) {{
             const M = v => v / 1e6;
             const color = {{ ingreso: '#1E7F73', resta: '#D6403A', suma: '#17A53D', total: '#334155', parcial: '#4D61B4', final: r.ebitda >= 0 ? '#11782C' : '#C91A15' }};
+            const CORTO = {{ 'Ingresos': 'Ingresos', '+ Depreciaciones': ['+ Deprec.'], '+ Amortizaciones': ['+ Amort.'], '+ Provisiones': ['+ Prov.'],
+                            'EBIT': 'EBIT', 'EBITDA': 'EBITDA' }};
+            const corto = e => Array.isArray(e) ? (e.join(' ') === 'EBITDA sin provisiones' ? ['EBITDA', 'sin prov.'] :
+                                                   e.join(' ') === '− Costo de ventas' ? ['− Costo', 'ventas'] :
+                                                   e.join(' ') === '− Gastos de administración' ? ['− Gastos', 'admón.'] : e)
+                                                : (CORTO[e] || e);
             const dibujar = (canvasId, clave, pasos) => {{
                 if (EB_STATE[clave]) EB_STATE[clave].destroy();
+                const cont = document.getElementById(canvasId).parentElement;
+                const angosto = (cont.clientWidth || 800) < 620;   // celular: barras horizontales
+                cont.style.height = angosto ? (pasos.length * 50 + 20) + 'px' : '';
+                const valTxt = x => (x.tipo === 'suma' ? '+' : '') + _ebM(x.v * 1e6);
+                const etqs = pasos.map(x => angosto ? [].concat(corto(x.etq)).concat([valTxt(x)]) : x.etq);
                 const fuerte = t => ['total', 'final', 'parcial'].includes(t);
+                const VAL = angosto ? 'x' : 'y', CAT = angosto ? 'y' : 'x';
+                const fmtEje = v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+                const escalas = {{}};
+                escalas[VAL] = {{ grace: '12%', border: {{ display: false }},
+                    grid: {{ color: c => (c.tick && c.tick.value === 0) ? '#64748b' : '#f1f5f9', lineWidth: c => (c.tick && c.tick.value === 0) ? 1.6 : 1 }},
+                    ticks: {{ display: !angosto, callback: fmtEje, maxTicksLimit: 11, color: c => (c.tick && c.tick.value === 0) ? '#334155' : '#94a3b8',
+                             font: c => ({{ size: angosto ? 9.5 : 11, weight: (c.tick && c.tick.value === 0) ? '700' : '400' }}) }} }};
+                escalas[CAT] = {{ grid: {{ display: false }}, ticks: {{ maxRotation: 0, autoSkip: false, color: c => angosto ? color[pasos[c.index].tipo] : '#475569',
+                    font: c => ({{ size: angosto ? 10.5 : 11, weight: fuerte(pasos[c.index].tipo) ? '800' : '500' }}) }} }};
                 EB_STATE[clave] = new Chart(document.getElementById(canvasId), {{
                     type: 'bar',
-                    data: {{ labels: pasos.map(x => x.etq), datasets: [{{
+                    data: {{ labels: etqs, datasets: [{{
                         data: pasos.map(x => [x.ini, x.fin]),
                         backgroundColor: pasos.map(x => color[x.tipo] + (fuerte(x.tipo) ? '' : 'D9')),
-                        borderRadius: 6, borderSkipped: false, maxBarThickness: 64, categoryPercentage: 0.82, barPercentage: 0.88
+                        borderRadius: 6, borderSkipped: false, maxBarThickness: angosto ? 26 : 64, categoryPercentage: 0.82, barPercentage: 0.88
                     }}] }},
                     options: {{
+                        indexAxis: angosto ? 'y' : 'x',
                         responsive: true, maintainAspectRatio: false, animation: {{ duration: 400 }},
-                        layout: {{ padding: {{ top: 24, bottom: 4, right: 8, left: 4 }} }},
+                        layout: {{ padding: angosto ? {{ top: 4, bottom: 4, right: 12, left: 4 }} : {{ top: 24, bottom: 4, right: 8, left: 4 }} }},
                         plugins: {{
                             legend: {{ display: false }},
                             tooltip: {{ callbacks: {{ title: it => it.length ? [].concat(pasos[it[0].dataIndex].etq).join(' ') : '', label: c => ' ' + _ebM(pasos[c.dataIndex].v * 1e6) }} }},
                             datalabels: {{
+                                display: !angosto,
                                 anchor: c => pasos[c.dataIndex].fin >= pasos[c.dataIndex].ini ? 'end' : 'start',
                                 align: c => pasos[c.dataIndex].fin >= pasos[c.dataIndex].ini ? 'end' : 'start',
-                                offset: 2, clamp: true, clip: false,
+                                offset: 3, clamp: false, clip: false,
                                 formatter: (_, c) => {{ const x = pasos[c.dataIndex]; return (x.tipo === 'suma' ? '+' : '') + _ebM(x.v * 1e6); }},
                                 color: c => color[pasos[c.dataIndex].tipo],
-                                font: c => ({{ size: 12, weight: fuerte(pasos[c.dataIndex].tipo) ? '800' : '600' }})
+                                font: c => ({{ size: angosto ? 10.5 : 12, weight: fuerte(pasos[c.dataIndex].tipo) ? '800' : '600' }})
                             }}
                         }},
-                        scales: {{
-                            y: {{ grace: '12%', border: {{ display: false }},
-                                 grid: {{ color: c => (c.tick && c.tick.value === 0) ? '#64748b' : '#f1f5f9', lineWidth: c => (c.tick && c.tick.value === 0) ? 1.6 : 1 }},
-                                 ticks: {{ callback: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}), color: c => (c.tick && c.tick.value === 0) ? '#334155' : '#94a3b8',
-                                          font: c => ({{ size: 11, weight: (c.tick && c.tick.value === 0) ? '700' : '400' }}) }} }},
-                            x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 0, autoSkip: false, color: '#475569',
-                                 font: c => ({{ size: 11, weight: fuerte(pasos[c.index].tipo) ? '800' : '500' }}) }} }}
-                        }}
+                        scales: escalas
                     }},
                     plugins: [{{
                         id: 'conectoresEB',   // línea punteada del final de cada barra al inicio de la siguiente
                         afterDatasetsDraw(ch) {{
-                            const meta = ch.getDatasetMeta(0), y = ch.scales.y, g = ch.ctx;
+                            const meta = ch.getDatasetMeta(0), ev = ch.scales[VAL], g = ch.ctx;
                             g.save(); g.setLineDash([4, 3]); g.strokeStyle = '#94a3b8'; g.lineWidth = 1.2;
                             for (let k = 0; k < pasos.length - 1; k++) {{
                                 const a = meta.data[k], b = meta.data[k + 1];
                                 if (!a || !b) continue;
-                                const yy = y.getPixelForValue(pasos[k].fin);
-                                g.beginPath(); g.moveTo(a.x + a.width / 2, yy); g.lineTo(b.x - b.width / 2, yy); g.stroke();
+                                const p = ev.getPixelForValue(pasos[k].fin);
+                                g.beginPath();
+                                if (angosto) {{ g.moveTo(p, a.y + a.height / 2); g.lineTo(p, b.y - b.height / 2); }}
+                                else {{ g.moveTo(a.x + a.width / 2, p); g.lineTo(b.x - b.width / 2, p); }}
+                                g.stroke();
                             }}
                             g.restore();
                         }}
@@ -14519,7 +14541,8 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const ejeX = {{ grid: {{ display: false }}, stacked: true, ticks: {{ maxRotation: 0, autoSkip: false,
                            font: c => ({{ size: 10.5, weight: c.index === i0 ? '800' : '500' }}), color: c => c.index === i0 ? '#11782C' : '#64748b' }} }};
             // a) Tres columnas por mes medidas desde el cero: EBIT, EBITDA sin provisiones y EBITDA
-            preparar('eb-comp-scroll', 'eb-comp-inner', 6);   // seis meses a la vista
+            const scComp = document.getElementById('eb-comp-scroll');
+            preparar('eb-comp-scroll', 'eb-comp-inner', (scComp.clientWidth || 900) < 620 ? 1 : 6);   // seis meses a la vista (dos en celular)
             if (EB_STATE.hist) EB_STATE.hist.destroy();
             // Colores por signo: verdes si es positivo; rojo / naranja si es negativo
             const serieCol = (label, campo, pos, neg, conEtiqueta) => ({{
@@ -14531,7 +14554,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                                anchor: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'start' : 'end',
                                align: c => (c.dataset.data[c.dataIndex] || 0) < 0 ? 'bottom' : 'top',
                                color: c => DATOS_EBITDA[c.dataIndex][campo] >= 0 ? '#0b3d20' : (neg === '#D6403A' ? '#9f1c12' : '#9a4a05'),
-                               font: c => ({{ size: c.dataIndex === i0 ? 14.5 : 13, weight: '800' }}),
+                               font: c => ({{ size: (scComp.clientWidth || 900) < 620 ? 11 : (c.dataIndex === i0 ? 14.5 : 13), weight: '800' }}),
                                formatter: v => v.toLocaleString('es-CO', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}) }}
             }});
             EB_STATE.hist = new Chart(document.getElementById('chartEBComp'), {{
@@ -23663,7 +23686,11 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                             display: (ctx) => {{
                                 if (ctx.dataIndex === 0) return false;   // primer período = acumulado parcial
                                 if (ctx.datasetIndex === 0) return 'auto';
-                                return _altoPxBarra(ctx.chart, Math.abs(ctx.dataset.data[ctx.dataIndex] || 0)) >= 15 ? 'auto' : false;
+                                if (_altoPxBarra(ctx.chart, Math.abs(ctx.dataset.data[ctx.dataIndex] || 0)) < 15) return false;
+                                // dentro de la barra solo si el texto cabe a lo ancho (en celular las barras son angostas)
+                                const el = ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.dataIndex];
+                                const txt = fmtEtiquetaICG(Math.abs(ctx.dataset.data[ctx.dataIndex] || 0));
+                                return el && el.width >= txt.length * 6.6 + 4 ? 'auto' : false;
                             }},
                             anchor: (ctx) => ctx.datasetIndex === 0 ? 'end' : 'center',
                             align: (ctx) => ctx.datasetIndex === 0 ? 'top' : 'center',
@@ -25718,7 +25745,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: {{ mode: 'index', intersect: false }},
-                    layout: {{ padding: {{ top: 24, bottom: 4, left: 4, right: 4 }} }},
+                    layout: {{ padding: {{ top: 24, bottom: 4, left: 40, right: 44 }} }},   // margen para que no se corten las etiquetas de los extremos
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
