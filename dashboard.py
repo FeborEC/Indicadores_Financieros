@@ -3389,6 +3389,22 @@ def _construir_menus_laterales() -> tuple[str, list]:
     return "\n".join(html), config
 
 
+def _mc_ligero(mc: list) -> list:
+    """MAT/CAMEL sin el detalle de auditoría (se carga aparte solo al descargar el Excel)."""
+    out = []
+    for r in mc or []:
+        x = {k: v for k, v in r.items() if k != "auditoria"}
+        x["variables"] = {k: {kk: vv for kk, vv in v.items() if kk not in ("t_num", "t_den")} for k, v in r["variables"].items()}
+        out.append(x)
+    return out
+
+
+def _mc_auditoria(mc: list) -> list:
+    return [{"auditoria": r.get("auditoria"),
+             "t": {k: {"t_num": v.get("t_num"), "t_den": v.get("t_den")} for k, v in r["variables"].items()}}
+            for r in mc or []]
+
+
 def _json_default(obj):
     """Convierte tipos de numpy/pandas a tipos nativos de Python para JSON."""
     if hasattr(obj, "item"):
@@ -13073,8 +13089,25 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         <!-- =================================================================
              DATOS Y LÓGICA INTERACTIVA
              ================================================================= -->
+        <!-- Datos del tablero en JSON: el navegador los lee con JSON.parse, mucho más liviano que como código (clave en celulares) -->
+        <script type="application/json" id="json-DATOS">{json.dumps(datos_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_MOROSIDAD">{json.dumps(morosidad_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_RIESGO">{json.dumps(riesgo_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_COBERTURA">{json.dumps(cobertura_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_CRECIMIENTO">{json.dumps(crecimiento_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_EVOLUCION_PATRIMONIO">{json.dumps(evolucion_patrimonio_json, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_ICG">{json.dumps(icg_json, default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_DEPOSITOS">{json.dumps(depositos_json, default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_INDICADORES">{json.dumps(series_indicadores, default=_json_default).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_CARTERA_SEGMENTOS">{json.dumps(cartera_segmentos, default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_EEFF">{json.dumps(estados_financieros, default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_MATCAMEL">{json.dumps(_mc_ligero(mat_camel), default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_CARTERA_PROV">{json.dumps(cartera_provision or [], default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <script type="application/json" id="json-DATOS_EBITDA">{json.dumps(ebitda or [], default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
+        <!-- Detalle de auditoría de MAT y CAMEL: se lee solo al descargar el Excel (ahorra memoria en celulares) -->
+        <script type="application/json" id="auditoria-mc">{json.dumps(_mc_auditoria(mat_camel), default=_json_default, ensure_ascii=False).replace('</', '<\/')}</script>
         <script>
-        const DATOS = {json.dumps(datos_json, default=_json_default)};
+        const DATOS = JSON.parse(document.getElementById('json-DATOS').textContent);
         const ETIQUETAS_CORTAS = {json.dumps(etiquetas_cortas)};
         const ETIQUETAS_LARGAS = {json.dumps(etiquetas_largas)};
         const SERIE_SOLVENCIA = {json.dumps(serie_solvencia, default=_json_default)};
@@ -13082,15 +13115,15 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const IDX_DEFAULT = {idx_default};
         
         // ===== DATOS DE MOROSIDAD =====
-        const DATOS_MOROSIDAD = {json.dumps(morosidad_json, default=_json_default)};
+        const DATOS_MOROSIDAD = JSON.parse(document.getElementById('json-DATOS_MOROSIDAD').textContent);
         const SERIE_INDICE_MORA = {json.dumps(serie_indice_mora, default=_json_default)};
         
         // ===== DATOS DE RIESGO (CALIDAD DE CARTERA) =====
-        const DATOS_RIESGO = {json.dumps(riesgo_json, default=_json_default)};
+        const DATOS_RIESGO = JSON.parse(document.getElementById('json-DATOS_RIESGO').textContent);
         const SERIE_CALIDAD_CARTERA = {json.dumps(serie_calidad_cartera, default=_json_default)};
         
         // ===== DATOS DE COBERTURA DE CARTERA =====
-        const DATOS_COBERTURA = {json.dumps(cobertura_json, default=_json_default)};
+        const DATOS_COBERTURA = JSON.parse(document.getElementById('json-DATOS_COBERTURA').textContent);
         const SERIE_COBERTURA_TOTAL = {json.dumps(serie_cobertura_total, default=_json_default)};
         const SERIE_COBERTURA_CON_GRAL = {json.dumps(serie_cobertura_con_gral, default=_json_default)};
         
@@ -13156,40 +13189,40 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
         const SERIE_COBERTURA = SERIE_COBERTURA_TOTAL;
         
         // ===== DATOS DE CRECIMIENTO DE CARTERA =====
-        const DATOS_CRECIMIENTO = {json.dumps(crecimiento_json, default=_json_default)};
+        const DATOS_CRECIMIENTO = JSON.parse(document.getElementById('json-DATOS_CRECIMIENTO').textContent);
         const SERIE_CRECIMIENTO_TOTAL = {json.dumps(serie_crecimiento_total, default=_json_default)};
         
         // ===== DATOS DE EVOLUCIÓN: ACTIVO, PASIVO, PATRIMONIO =====
         const DATOS_EVOLUCION_ACTIVO     = {json.dumps(evolucion_activo_json, default=_json_default)};
         const DATOS_EVOLUCION_PASIVO     = {json.dumps(evolucion_pasivo_json, default=_json_default)};
-        const DATOS_EVOLUCION_PATRIMONIO = {json.dumps(evolucion_patrimonio_json, default=_json_default)};
+        const DATOS_EVOLUCION_PATRIMONIO = JSON.parse(document.getElementById('json-DATOS_EVOLUCION_PATRIMONIO').textContent);
         const SERIE_EVOLUCION_ACTIVO     = DATOS_EVOLUCION_ACTIVO.map(r => r.saldo_actual);
         const SERIE_EVOLUCION_PASIVO     = DATOS_EVOLUCION_PASIVO.map(r => r.saldo_actual);
         const SERIE_EVOLUCION_PATRIMONIO = DATOS_EVOLUCION_PATRIMONIO.map(r => r.saldo_actual);
         
         // ===== DATOS DE INGRESOS, COSTOS Y GASTOS =====
-        const DATOS_ICG = {json.dumps(icg_json, default=_json_default, ensure_ascii=False)};
+        const DATOS_ICG = JSON.parse(document.getElementById('json-DATOS_ICG').textContent);
         const SERIE_ICG_INGRESOS  = DATOS_ICG.map(r => r.ingresos);
         const SERIE_ICG_COSTOS    = DATOS_ICG.map(r => r.costos);
         const SERIE_ICG_GASTOS    = DATOS_ICG.map(r => r.gastos_sin_excedente);
         const SERIE_ICG_EXCEDENTE = DATOS_ICG.map(r => r.excedente);
         
         // ===== DATOS DE CRECIMIENTO DE DEPÓSITOS =====
-        const DATOS_DEPOSITOS = {json.dumps(depositos_json, default=_json_default, ensure_ascii=False)};
+        const DATOS_DEPOSITOS = JSON.parse(document.getElementById('json-DATOS_DEPOSITOS').textContent);
         const SERIE_DEP_TOTAL   = DATOS_DEPOSITOS.map(r => r.total_depositos);
         const SERIE_DEP_CAPITAL = DATOS_DEPOSITOS.map(r => r.total_capital);
         
         // ===== DATOS DE INDICADORES ADICIONALES (cuentas directas por período) =====
-        const DATOS_INDICADORES = {json.dumps(series_indicadores, default=_json_default)};
+        const DATOS_INDICADORES = JSON.parse(document.getElementById('json-DATOS_INDICADORES').textContent);
         // ===== SEGMENTOS DE CARTERA POR PERÍODO (evolución estilo Depósitos) =====
-        const DATOS_CARTERA_SEGMENTOS = {json.dumps(cartera_segmentos, default=_json_default, ensure_ascii=False)};
+        const DATOS_CARTERA_SEGMENTOS = JSON.parse(document.getElementById('json-DATOS_CARTERA_SEGMENTOS').textContent);
         // ===== ESTADOS FINANCIEROS MENSUALES (E.S.F. y E.R.I.) =====
-        const DATOS_EEFF = {json.dumps(estados_financieros, default=_json_default, ensure_ascii=False)};
+        const DATOS_EEFF = JSON.parse(document.getElementById('json-DATOS_EEFF').textContent);
         // ===== MODELOS MAT Y CAMEL (parámetros versionados) =====
-        const DATOS_MATCAMEL = {json.dumps(mat_camel, default=_json_default, ensure_ascii=False)};
+        const DATOS_MATCAMEL = JSON.parse(document.getElementById('json-DATOS_MATCAMEL').textContent);
         const PARAMETROS_MC = {json.dumps(parametros_mc or {}, default=_json_default, ensure_ascii=False)};
-        const DATOS_CARTERA_PROV = {json.dumps(cartera_provision or [], default=_json_default, ensure_ascii=False)};
-        const DATOS_EBITDA = {json.dumps(ebitda or [], default=_json_default, ensure_ascii=False)};
+        const DATOS_CARTERA_PROV = JSON.parse(document.getElementById('json-DATOS_CARTERA_PROV').textContent);
+        const DATOS_EBITDA = JSON.parse(document.getElementById('json-DATOS_EBITDA').textContent);
 
         // ===== SERIES DE COMPOSICIÓN (Numerador / Denominador) =====
         const SERIE_SOLVENCIA_NUM = {json.dumps(serie_solvencia_num, default=_json_default)};
@@ -14542,7 +14575,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
                            font: c => ({{ size: 10.5, weight: c.index === i0 ? '800' : '500' }}), color: c => c.index === i0 ? '#11782C' : '#64748b' }} }};
             // a) Tres columnas por mes medidas desde el cero: EBIT, EBITDA sin provisiones y EBITDA
             const scComp = document.getElementById('eb-comp-scroll');
-            preparar('eb-comp-scroll', 'eb-comp-inner', (scComp.clientWidth || 900) < 620 ? 1 : 6);   // seis meses a la vista (dos en celular)
+            preparar('eb-comp-scroll', 'eb-comp-inner', (scComp.clientWidth || 900) < 620 ? 1.5 : 6);   // seis meses a la vista (dos en celular)
             if (EB_STATE.hist) EB_STATE.hist.destroy();
             // Colores por signo: verdes si es positivo; rojo / naranja si es negativo
             const serieCol = (label, campo, pos, neg, conEtiqueta) => ({{
@@ -14681,7 +14714,19 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             catch (e) {{ console.error(e); sp.textContent = 'No se pudo'; }}
             setTimeout(() => {{ sp.textContent = t0; btn.disabled = false; }}, 1800);
         }}
+        function _cargarAuditoriaMC() {{
+            if (DATOS_MATCAMEL._auditoria) return;
+            const el = document.getElementById('auditoria-mc');
+            const aud = el ? JSON.parse(el.textContent) : [];
+            DATOS_MATCAMEL.forEach((r, i) => {{
+                const a = aud[i] || {{}};
+                r.auditoria = a.auditoria;
+                Object.entries(a.t || {{}}).forEach(([k, t]) => {{ if (r.variables[k]) Object.assign(r.variables[k], t); }});
+            }});
+            DATOS_MATCAMEL._auditoria = true;
+        }}
         async function descargarExcelMAT() {{
+            _cargarAuditoriaMC();
             const st = MC_STATE.mat, r = DATOS_MATCAMEL[st.idx], m = r.mat, A = 'FFB5452B';
             const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const sub = `Período: ${{_etqLargaMC(r)}} · parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}})`;
@@ -14773,6 +14818,7 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             }});
         }}
         async function descargarExcelCAMEL() {{
+            _cargarAuditoriaMC();
             const st = MC_STATE.camel, r = DATOS_MATCAMEL[st.idx], c = r.camel, A = 'FFB5452B';
             const wb = new ExcelJS.Workbook(); wb.creator = 'Dashboard Financiero';
             const sub = `Período: ${{_etqLargaMC(r)}} · parámetros versión ${{r.version}} (vigente desde ${{r.version_desde}}) · mínimo legal de solvencia ${{(c.minimo_legal * 100).toFixed(2).replace('.', ',')}}%`;
@@ -14948,6 +14994,22 @@ def generar_html(todos_resultados: list, ruta_salida: str = "index.html",
             const claves100 = {{ 'cartera-activo-gauge': 'cartera_activo', 'depositos-pasivo-gauge': 'depositos_pasivo', 'depositos-cartera-gauge': 'depositos_cartera' }};
             envolver('_actualizarGauge100', (prefijo, pct) => {{ if (claves100[prefijo]) _aplicarVelocimetro(claves100[prefijo], prefijo + '-needle-group', prefijo + '-text', pct); }});
         }})();
+        // ===== MEMORIA: densidad de dibujo de cada gráfico limitada a un tamaño seguro =====
+        // En celulares la pantalla dibuja a 3x; un gráfico de 20.000 px de ancho supera el límite de Safari y la página se cierra.
+        Chart.register({{
+            id: 'densidadSegura',
+            beforeInit(chart) {{
+                try {{
+                    const p = chart.canvas.parentElement;
+                    const w = Math.max(1, (p && p.clientWidth) || chart.canvas.width || 300);
+                    const h = Math.max(1, (p && p.clientHeight) || chart.canvas.height || 300);
+                    const base = Math.min(window.devicePixelRatio || 1, 2);
+                    const tope = Math.sqrt(2500000 / (w * h));     // como máximo ~2,5 millones de píxeles por gráfico
+                    const o = chart.config.options;
+                    if (o && o.devicePixelRatio === undefined) o.devicePixelRatio = Math.max(0.75, Math.min(base, tope));
+                }} catch (e) {{}}
+            }}
+        }});
         // ===== ANIMACIÓN GLOBAL PARA TODOS LOS GRÁFICOS =====
         // Transición suave consistente en todo el modelo: al crear o actualizar cualquier
         // gráfico (incluido al cambiar de período en los filtros), las barras/líneas se
